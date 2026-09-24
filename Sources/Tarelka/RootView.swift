@@ -56,6 +56,15 @@ struct RootView: View {
                     do { try await Task.sleep(for: .seconds(60)) } catch { break }
                 }
             }
+            .onOpenURL { url in
+                guard url.scheme == "tarelka" else { return }
+                switch url.host {
+                case "diary": model.selectedDay = Date(); model.screen = .diary
+                case "drink": model.drinkEditor = DrinkDraft()
+                default: model.screen = .day
+                }
+                NSApp.activate(ignoringOtherApps: true)
+            }
     }
     private var sidebar: some View {
         GeometryReader { geometry in

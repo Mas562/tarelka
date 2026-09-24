@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import NutritionCore
 import UniformTypeIdentifiers
+import Combine
+import WidgetKit
 
 enum Screen: Hashable { case newMeal, diary, products, day, week, coach, recipes, settings }
 enum WeightMode: String, CaseIterable { case portion = "Общий вес порции", ingredients = "Вес каждого ингредиента" }
@@ -79,8 +81,11 @@ final class AppModel: ObservableObject {
     let recipes = RecipeStore()
     private var analysisTask: Task<Void, Never>?
     private var requestID = UUID()
+    private var personalSubscription: AnyCancellable?
+    private let publishesWidget: Bool
 
     init(directory suppliedDirectory: URL? = nil) {
+        publishesWidget = suppliedDirectory == nil && ProcessInfo.processInfo.environment["TARELKA_DATA_DIR"] == nil
         let directory: URL
         if let suppliedDirectory { directory = suppliedDirectory }
         else if let override = ProcessInfo.processInfo.environment["TARELKA_DATA_DIR"] {
@@ -98,6 +103,35 @@ final class AppModel: ObservableObject {
         hasKey = Keychain.containsKey()
         modelName = UserDefaults.standard.string(forKey: "visionModel") ?? OpenAIService.defaultModel
         provider = RecognitionProvider.restored(UserDefaults.standard.string(forKey: "recognitionProvider"))
+        personalSubscription = personal.$data.dropFirst().sink { [weak self] _ in
+            self?.reloadWidget()
+        }
+        reloadWidget()
+    }
+    func reloadWidget() {
+        guard publishesWidget, storageError == nil, self.personal.storageError == nil else { return }
+        WidgetCenter.shared.reloadTimelines(ofKind: TodaySnapshotStore.widgetKind)
+    }
+    var recentMeals: [Meal] {
+        var seen = Set<String>()
+        return meals.filter { meal in
+            let key = "\(meal.isDrink)|\(meal.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current))|\(meal.weight)"
+            return seen.insert(key).inserted
+        }.prefix(5).map { $0 }
+    }
+    func repeatMeal(_ original: Meal) {
+        guard storageError == nil else { return }
+        let repeated = Meal(date: Date(), kind: .suggested(), name: original.name, weight: original.weight,
+                            ingredients: original.ingredients, notes: original.notes,
+                            assumptions: original.assumptions, isEstimate: original.isEstimate)
+        do {
+            var updated = meals
+            updated.append(repeated); updated.sort { $0.date > $1.date }
+            try repository.save(updated)
+            meals = updated; selectedDay = repeated.date
+            notice = original.isDrink ? "Напиток добавлен повторно." : "Блюдо добавлено повторно."
+            reloadWidget()
+        } catch { errorMessage = "Не удалось повторить запись: \(error.localizedDescription)" }
     }
     var parsedWeight: Double? {
         if weightMode == .ingredients && hasResult {
@@ -337,6 +371,7 @@ final class AppModel: ObservableObject {
             updated.append(meal); updated.sort { $0.date > $1.date }
             try repository.save(updated)
             meals = updated
+            reloadWidget()
             repository.removePhoto(previous?.photoFilename)
             selectedDay = meal.date
             resetDraft(); screen = .diary; notice = "Блюдо сохранено в дневник."
@@ -350,6 +385,7 @@ final class AppModel: ObservableObject {
         let updated = meals.filter { $0.id != meal.id }
         do {
             try repository.save(updated); meals = updated
+            reloadWidget()
             repository.removePhoto(meal.photoFilename)
             if editingID == meal.id { resetDraft() }
         } catch { errorMessage = "Не удалось удалить запись: \(error.localizedDescription)" }
@@ -372,6 +408,7 @@ final class AppModel: ObservableObject {
             updated.append(meal); updated.sort { $0.date > $1.date }
             try repository.save(updated)
             meals = updated; selectedDay = meal.date; screen = .diary
+            reloadWidget()
             if previous?.photoFilename != meal.photoFilename { repository.removePhoto(previous?.photoFilename) }
             notice = "Напиток сохранён в дневник."
         } catch {

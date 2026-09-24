@@ -42,5 +42,11 @@ struct TarelkaApp: App {
                 Button("Сохранить блюдо") { model.saveMeal() }.keyboardShortcut("s").disabled(!model.canSave)
             }
         }
+        MenuBarExtra("Тарелка", systemImage: "fork.knife") {
+            MenuBarDashboard()
+                .environmentObject(model)
+                .environmentObject(model.personal)
+        }
+        .menuBarExtraStyle(.window)
     }
 }

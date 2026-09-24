@@ -2,7 +2,7 @@ import Foundation
 
 /// A planning split within adult AMDR ranges, not an individually prescribed requirement.
 /// Height, weight and activity enter through the existing daily energy budget.
-public struct MacroTargets: Encodable, Equatable, Sendable {
+public struct MacroTargets: Codable, Equatable, Sendable {
     public let protein: Double
     public let fat: Double
     public let carbs: Double
