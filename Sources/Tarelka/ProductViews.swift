@@ -22,7 +22,7 @@ struct ProductsView: View {
                 HStack {
                     Text("Мои продукты").font(.system(size: 31, weight: .semibold))
                     Spacer()
-                    Button { editor = EditorRequest(product: nil, scanOnOpen: true) } label: { Label("С фото упаковки", systemImage: "text.viewfinder") }.buttonStyle(PrimaryButton())
+                    Button { editor = EditorRequest(product: nil, scanOnOpen: true) } label: { Label("С фото упаковки", systemImage: "text.viewfinder") }.buttonStyle(PrimaryButton()).fixedSize()
                     Button { editor = EditorRequest(product: nil) } label: { Image(systemName: "plus") }.buttonStyle(SoftButton()).accessibilityLabel("Новый продукт вручную")
                 }
                 Text("Сохраните калории и БЖУ на 100 г или 100 мл один раз. Затем указывайте только вес или объём.")
@@ -42,8 +42,9 @@ struct ProductsView: View {
                 ForEach(products) { product in
                     Card(padding: 18) {
                         HStack(spacing: 16) {
+                            IconTile(symbol: product.unit == .grams ? "shippingbox" : "drop", color: product.unit == .grams ? Palette.green : Palette.blue, size: 44)
                             VStack(alignment: .leading, spacing: 7) {
-                                Text(product.name).font(.system(size: 17, weight: .medium))
+                                Text(product.name).font(.system(size: 17, weight: .semibold))
                                 Text("\(Numbers.display(product.per100.calories)) ккал · Б \(Numbers.display(product.per100.protein)) · Ж \(Numbers.display(product.per100.fat)) · У \(Numbers.display(product.per100.carbs)) г на \(product.unit.basis)")
                                     .font(.system(size: 12)).foregroundStyle(Palette.secondary)
                                 if product.caloriesFromMacros { Text("Калории приблизительно рассчитаны по БЖУ").font(.system(size: 10)).foregroundStyle(Palette.orange) }

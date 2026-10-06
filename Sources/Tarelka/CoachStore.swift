@@ -42,7 +42,7 @@ final class CoachStore: ObservableObject {
                 recentAdvice.append(String((result.next_meal + " " + result.swap).prefix(650)))
                 recentAdvice = Array(recentAdvice.suffix(4))
                 if let historyURL, let data = try? JSONEncoder().encode(recentAdvice) {
-                    try? data.write(to: historyURL, options: .atomic)
+                    try? PrivateStorage.write(data, to: historyURL)
                 }
             } catch {
                 guard token == requestToken else { return }

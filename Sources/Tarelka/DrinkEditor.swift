@@ -164,7 +164,7 @@ struct DrinkEditor: View {
                 Button("Отмена") { dismiss() }.buttonStyle(SoftButton()).keyboardShortcut(.cancelAction)
                 Button(draft.original == nil ? "Сохранить в дневник" : "Сохранить изменения") {
                     guard let meal = draft.meal else { return }
-                    do { try model.saveDrink(meal, photoChange: photo.change); dismiss() }
+                    do { try model.saveDrink(meal, photoChange: photo.change, original: draft.original); dismiss() }
                     catch { self.error = error.localizedDescription }
                 }.buttonStyle(PrimaryButton()).disabled(draft.meal == nil || model.storageError != nil || photo.busy || analyzing)
             }.padding(.top, 16)

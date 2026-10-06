@@ -15,14 +15,25 @@ final class PersonalStore: ObservableObject {
     private var filePanel: NSOpenPanel?
     init(directory: URL) {
         repository = PersonalRepository(directory: directory)
-        do { data = try repository.load() }
-        catch { storageError = "Не удалось открыть продукты и профиль. Файл сохранён без изменений: \(error.localizedDescription)" }
+        do {
+            let backup = try? repository.recoverDamaged()
+            data = try repository.load()
+            if let backup {
+                error = "Часть продуктов или настроек была повреждена и пропущена. Исходный файл сохранён как \(backup.lastPathComponent) в папке дневника."
+            }
+        } catch { storageError = "Не удалось открыть продукты и профиль. Файл сохранён без изменений: \(error.localizedDescription)" }
     }
     @discardableResult
     private func commit(_ value: PersonalData) -> Bool {
         guard storageError == nil else { return false }
-        do { try repository.save(value); data = value; error = nil; return true }
-        catch { self.error = error.localizedDescription; return false }
+        do { data = try repository.save(value, replacing: data); error = nil; return true }
+        catch {
+            self.error = error.localizedDescription
+            // Show what the other copy saved so the user repeats the action on current data.
+            let conflict = (error as? PersonalError) == .storageConflict
+            if conflict, let fresh = try? repository.load() { data = fresh }
+            return false
+        }
     }
     func saveProduct(_ product: SavedProduct) -> Bool {
         var updated = data
@@ -49,7 +60,9 @@ final class PersonalStore: ObservableObject {
     func saveManualActivity(calories: Double, date: Date) -> Bool {
         var updated = data
         do {
-            try updated.mergeActivity([DailyActivity(day: DayKey.string(date), activeCalories: calories, updatedAt: Date(), source: .manual)])
+            // An explicit correction takes precedence even after an import from a device
+            // whose clock was ahead. Automatic imports still use timestamp ordering.
+            try updated.mergeActivity([DailyActivity(day: DayKey.string(date), activeCalories: calories, updatedAt: Date(), source: .manual)], preferIncoming: true)
             return commit(updated)
         } catch { self.error = error.localizedDescription; return false }
     }

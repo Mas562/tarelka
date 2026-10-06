@@ -27,7 +27,8 @@ public struct NutritionSource: Codable, Equatable, Sendable {
 
 public struct FoodCatalog: Sendable {
     public let foods: [CatalogFood]
-    private let indexed: [(food: CatalogFood, text: String)]
+    /// `head` holds the words of the food itself (before the first comma), e.g. “Bread” in “Bread, egg”.
+    private let indexed: [(food: CatalogFood, words: [String], head: [String])]
     public static let shared: FoodCatalog = {
         let bundled = Bundle.main.resourceURL?.appendingPathComponent("Tarelka_NutritionCore.bundle")
         let resource = bundled.flatMap(Bundle.init(url:))?.url(forResource: "usda-sr-legacy", withExtension: "json")
@@ -38,10 +39,30 @@ public struct FoodCatalog: Sendable {
     public init(foods: [CatalogFood]) {
         self.foods = foods.filter { $0.per100.isValidPer100 }
         indexed = self.foods.map { food in
-            let lower = " " + Self.normalize(food.name)
-            let aliases = Self.terms.filter { lower.contains(" " + $0.0) }.map(\.1).joined(separator: " ")
-            return (food, Self.normalize(food.name + " " + aliases))
+            let head = food.name.components(separatedBy: ",").first ?? food.name
+            return (food, Self.searchWords(food.name), Self.searchWords(head))
         }
+    }
+    /// Original words plus Russian aliases of whole English words: “pea” never aliases “pear” or “peanut”.
+    private static func searchWords(_ text: String) -> [String] {
+        let words = normalize(text).split(separator: " ").map(String.init)
+        let aliases = terms.filter { contains($0.0, in: words) }.flatMap { normalize($0.1).split(separator: " ").map(String.init) }
+        return words + aliases
+    }
+    private static func contains(_ term: String, in words: [String]) -> Bool {
+        let parts = term.split(separator: " ").map(String.init)
+        guard !parts.isEmpty, words.count >= parts.count else { return false }
+        return (0...(words.count - parts.count)).contains { start in
+            parts.indices.allSatisfy { isForm(words[start + $0], of: parts[$0]) }
+        }
+    }
+    /// Singular and plural forms only; stems such as “strawberr” cover “strawberry/strawberries”.
+    private static func isForm(_ word: String, of term: String) -> Bool {
+        word == term || word == term + "s" || word == term + "es"
+            || (term.hasSuffix("rr") && (word == term + "y" || word == term + "ies"))
+    }
+    private static func matches(_ token: String, _ words: [String]) -> Bool {
+        words.contains { $0 == token || (token.count >= 3 && $0.hasPrefix(token)) }
     }
     public func exact(_ query: String) -> CatalogFood? {
         let query = Self.normalize(query)
@@ -52,14 +73,13 @@ public struct FoodCatalog: Sendable {
     public func search(_ query: String, limit: Int = 60) -> [CatalogFood] {
         let tokens = Self.normalize(query).split(separator: " ").map(String.init)
         guard !tokens.isEmpty else { return Array(foods.prefix(limit)) }
+        let normalizedQuery = Self.normalize(query)
         return indexed.compactMap { entry -> (CatalogFood, Int)? in
-            let words = entry.text.split(separator: " ")
-            let matched = tokens.allSatisfy { token in
-                words.contains { $0 == token || (token.count >= 3 && $0.hasPrefix(token)) }
-            }
-            guard matched else { return nil }
-            let exact = Self.normalize(entry.food.displayName) == Self.normalize(query) || Self.normalize(entry.food.name) == Self.normalize(query)
-            return (entry.food, exact ? 0 : entry.food.name.count + Self.searchPenalty(entry.food.name))
+            guard tokens.allSatisfy({ Self.matches($0, entry.words) }) else { return nil }
+            let exact = Self.normalize(entry.food.displayName) == normalizedQuery || Self.normalize(entry.food.name) == normalizedQuery
+            // “яйцо” should list eggs before egg bread: the first word must name the food itself.
+            let secondary = Self.matches(tokens[0], entry.head) ? 0 : 400
+            return (entry.food, exact ? 0 : entry.food.name.count + secondary + Self.searchPenalty(entry.food.name))
         }.sorted { $0.1 == $1.1 ? $0.0.id < $1.0.id : $0.1 < $1.1 }.prefix(limit).map(\.0)
     }
     public static func normalize(_ value: String) -> String {
@@ -77,10 +97,16 @@ public struct FoodCatalog: Sendable {
         return 0
     }
     public static func localized(_ name: String) -> String {
-        name.components(separatedBy: ", ").map { part in
-            translations[part.lowercased()] ?? part
+        let parts = name.components(separatedBy: ", ")
+        let head = parts.first?.lowercased() ?? ""
+        return parts.map { part in
+            // Some words change meaning with the food: an egg white is not a white egg.
+            contextual["\(head)|\(part.lowercased())"] ?? translations[part.lowercased()] ?? part
         }.joined(separator: " · ")
     }
+    private static let contextual: [String: String] = [
+        "egg|white": "белок", "egg|yolk": "желток", "eggs|white": "белок", "eggs|yolk": "желток"
+    ]
     // Search aliases are category words, never evidence for automatically choosing a food.
     private static let terms: [(String, String)] = [
         ("chicken", "курица куриная куриный куриное курицу"), ("turkey", "индейка индейки"),
@@ -94,6 +120,7 @@ public struct FoodCatalog: Sendable {
         ("pasta", "макароны паста"), ("spaghetti", "спагетти макароны"), ("barley", "перловка ячмень"),
         ("millet", "пшено пшенная"), ("quinoa", "киноа"), ("bread", "хлеб"), ("rye", "ржаной рожь"),
         ("wheat", "пшеница пшеничный"), ("flour", "мука"), ("egg", "яйцо яйца яичный"),
+        ("egg white", "белок"), ("egg yolk", "желток"), ("oatmeal", "овсянка овсяная"), ("soybean", "соя соевый"),
         ("milk", "молоко молочный"), ("yogurt", "йогурт"), ("cheese", "сыр"), ("cottage", "творог"),
         ("cream", "сливки"), ("sour cream", "сметана"), ("butter", "масло сливочное"), ("kefir", "кефир"),
         ("potato", "картофель картошка"), ("tomato", "помидор томат"), ("cucumber", "огурец огурцы"),

@@ -48,9 +48,14 @@ struct BudgetCoachTests {
         #expect(data.budget(on: date, eaten: 500)?.deficit == 300)
         data.manualTarget = 2500
         #expect(data.budget(on: date, eaten: 500)?.deficit == 0)
-        data.manualTarget = nil; data.activity = []
+        data.manualTarget = nil
+        data.activity = [DailyActivity(day: DayKey.string(date), activeCalories: 0, updatedAt: date, source: .manual)]
         data.profile = CalorieProfile(height: 165, weight: 60, age: 60, sex: .female, activity: .low)
         #expect(data.budget(on: date, eaten: 0)?.deficit == 0) // Resting estimate already below 1200.
+        data.activity = []
+        // Without the day's activity a sedentary allowance applies, and the 1200 floor still holds.
+        let provisional = try #require(data.budget(on: date, eaten: 0))
+        #expect(provisional.provisionalActivity == 234 && provisional.deficit == 140 && provisional.target == 1264)
         data.profile = CalorieProfile(height: 190, weight: 60, age: 25, sex: .male, activity: .low)
         #expect(data.budget(on: date, eaten: 0)?.deficit == 0) // Low BMI: no automatic reduction.
         #expect(data.budget(on: date, eaten: .nan) == nil)

@@ -22,7 +22,7 @@ final class DrinkPhotoStore: ObservableObject {
         let request = token
         task = Task {
             do {
-                let bytes = try await Task.detached(priority: .userInitiated) { try PhotoLoader.load(url: url) }.value
+                let bytes = try await PhotoLoader.performAsync { try PhotoLoader.load(url: url) }
                 try Task.checkCancellation()
                 guard request == token else { return }
                 data = bytes; preview = NSImage(data: bytes)

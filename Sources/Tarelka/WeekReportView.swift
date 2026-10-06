@@ -67,8 +67,9 @@ struct WeekReportView: View {
                         ForEach(Array(report.days.enumerated()), id: \.offset) { index, day in
                             VStack(spacing: 7) {
                                 Image(systemName: day.hasEntries ? "checkmark" : day.isFuture ? "minus" : "circle")
-                                    .font(.system(size: 10, weight: .semibold)).frame(width: 26, height: 31)
-                                    .background(Palette.blue.opacity(day.hasEntries ? 0.18 : 0.05), in: RoundedRectangle(cornerRadius: 9))
+                                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(day.hasEntries ? Palette.green : Palette.secondary)
+                                    .frame(width: 26, height: 31)
+                                    .background(day.hasEntries ? Palette.mint : Palette.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                                 Text(weekdays[index]).font(.system(size: 9)).opacity(0.8)
                             }.accessibilityElement(children: .ignore)
                                 .accessibilityLabel("\(weekdays[index]): \(day.hasEntries ? "есть записи" : day.isFuture ? "ещё впереди" : "нет записей")")
@@ -132,7 +133,7 @@ struct WeekReportView: View {
                             }
                         }
                     }
-                    .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in AxisGridLine(stroke: StrokeStyle(dash: [3, 4])); AxisValueLabel() } }
+                    .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in AxisGridLine(stroke: StrokeStyle(lineWidth: 0.6, dash: [3, 4])).foregroundStyle(Palette.line); AxisValueLabel().font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.secondary) } }
                     .frame(height: 215)
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "minus").foregroundStyle(Palette.blue)

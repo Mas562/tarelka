@@ -40,7 +40,7 @@ struct CoachView: View {
                     Text("Бесплатная модель работает на этом Mac. Это общие советы по записанной еде, а не медицинские назначения. Помощник не видит незаписанные блюда и может ошибаться.")
                         .font(.system(size: 11)).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
                 }.padding(.horizontal, 5)
-                Link("О разнообразном питании и устойчивых привычках · NIDDK", destination: URL(string: "https://www.niddk.nih.gov/health-information/weight-management/adult-overweight-obesity/eating-physical-activity")!)
+                Link("О разнообразном питании и устойчивых привычках · NIDDK", destination: URL(string: "https://www.niddk.nih.gov/health-information/weight-management/adult-overweight-obesity/eating-physical-activity")!).foregroundStyle(Palette.green)
                     .font(.system(size: 11))
             }.padding(30).frame(maxWidth: 1050).frame(maxWidth: .infinity)
         }.sheet(isPresented: $showPreferences) { CoachPreferences() }

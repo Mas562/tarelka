@@ -2,7 +2,7 @@ import Foundation
 
 public enum FoodError: LocalizedError {
     case invalidWeight, invalidIngredient, mismatchedWeight, mixedUnits, noFood, invalidResponse
-    case requestFailed(Int), unauthorized, rateLimited, incomplete, refused, storageVersion
+    case requestFailed(Int), unauthorized, rateLimited, incomplete, refused, storageVersion, duplicateEntries, storageConflict
 
     public var errorDescription: String? {
         switch self {
@@ -18,6 +18,8 @@ public enum FoodError: LocalizedError {
         case .incomplete: return "Сервис не завершил распознавание. Попробуйте ещё раз."
         case .refused: return "Сервис не смог обработать это фото. Попробуйте другой снимок блюда."
         case .storageVersion: return "Дневник создан более новой версией приложения. Обновите «Тарелку», чтобы открыть его."
+        case .duplicateEntries: return "В дневнике повторяются идентификаторы записей или ингредиентов. Запись не сохранена."
+        case .storageConflict: return "Дневник изменён или сохраняется в другой копии «Тарелки». Изменения не перезаписаны. Откройте запись заново после перезапуска приложения."
         }
     }
 }
@@ -181,6 +183,7 @@ public struct Meal: Identifiable, Codable, Equatable, Sendable {
     public func validate() throws {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw FoodError.invalidIngredient }
         try NutritionMath.validate(ingredients, weight: weight)
+        guard Set(ingredients.map(\.id)).count == ingredients.count else { throw FoodError.duplicateEntries }
     }
 }
 

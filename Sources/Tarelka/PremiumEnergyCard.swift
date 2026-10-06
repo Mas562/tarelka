@@ -30,7 +30,7 @@ struct PremiumEnergyCard: View {
                         .font(.system(size: 15, weight: .medium)).foregroundStyle(Palette.secondary)
                     HStack(alignment: .firstTextBaseline, spacing: 9) {
                         Text(Numbers.display(abs(budget.remaining), decimals: 0))
-                            .font(.system(size: 68, weight: .semibold, design: .rounded)).tracking(-2.5)
+                            .font(.system(size: 72, weight: .semibold, design: .rounded)).tracking(-3)
                             .monospacedDigit().animatedNumber(abs(budget.remaining))
                             .lineLimit(1).minimumScaleFactor(0.55)
                         Text("ккал").font(.system(size: 18, weight: .medium)).foregroundStyle(Palette.secondary)
@@ -38,17 +38,17 @@ struct PremiumEnergyCard: View {
                     Text("из \(Numbers.display(budget.target, decimals: 0)) ккал · дневной ориентир")
                         .font(.system(size: 12)).foregroundStyle(Palette.secondary)
                     if budget.awaitingActivity {
-                        Label("Пока без активности с часов", systemImage: "clock")
+                        Label(budget.provisionalActivity > 0 ? "Данных часов пока нет · учтена минимальная бытовая активность" : "Пока без активности с часов", systemImage: "clock")
                             .font(.system(size: 11)).foregroundStyle(Palette.secondary)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 ZStack {
-                    Circle().stroke(Palette.blue.opacity(0.08), lineWidth: 16)
+                    Circle().stroke(Palette.green.opacity(0.09), lineWidth: 16)
                     Circle().trim(from: 0, to: appeared || reduceMotion ? fraction : 0)
-                        .stroke(AngularGradient(colors: [Color(red: 0.23, green: 0.77, blue: 0.83), Palette.blue], center: .center),
+                        .stroke(AngularGradient(colors: [Color(red: 0.42, green: 0.82, blue: 0.70), Palette.green], center: .center),
                                 style: StrokeStyle(lineWidth: 16, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                        .shadow(color: Palette.blue.opacity(0.15), radius: 5, y: 3)
+                        .shadow(color: Palette.green.opacity(0.22), radius: 6, y: 3)
                         .animation(reduceMotion ? nil : .spring(response: 0.8, dampingFraction: 0.86), value: appeared)
                         .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.86), value: fraction)
                     Circle().stroke(Palette.edge.opacity(0.9), lineWidth: 1).padding(14)
@@ -63,9 +63,11 @@ struct PremiumEnergyCard: View {
             }
             Rectangle().fill(Palette.ink.opacity(0.08)).frame(height: 1)
             HStack(spacing: 16) {
-                metric(baseTitle, value: budget.base, sign: "", symbol: "heart", color: Palette.secondary)
+                metric(baseTitle, value: budget.base, sign: "", symbol: "heart", color: Palette.gold)
                 if budget.creditsActivity {
-                    metric("Активность", value: budget.active, sign: "+", symbol: "figure.walk", color: Palette.blue)
+                    let estimated = budget.active == nil && budget.provisionalActivity > 0
+                    metric(estimated ? "Активность ≈" : "Активность", value: estimated ? budget.provisionalActivity : budget.active,
+                           sign: "+", symbol: "figure.walk", color: Palette.blue)
                 }
                 metric("Съедено", value: budget.eaten, sign: "−", symbol: "fork.knife", color: Palette.green)
             }
@@ -79,13 +81,12 @@ struct PremiumEnergyCard: View {
                 }.font(.system(size: 10)).foregroundStyle(Palette.secondary)
             }
         }.padding(27).foregroundStyle(Palette.ink)
-            .liquidSurface(radius: 28, tint: .white.opacity(0.18), clear: true)
+            .liquidSurface(radius: 30, tint: Palette.surface.opacity(0.22), clear: true)
             .onAppear { appeared = true }
     }
     private func metric(_ name: String, value: Double?, sign: String, symbol: String, color: Color) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 17, weight: .regular)).foregroundStyle(color)
-                .frame(width: 38, height: 38).background(color.opacity(0.065), in: RoundedRectangle(cornerRadius: 12))
+            IconTile(symbol: symbol, color: color)
             VStack(alignment: .leading, spacing: 5) {
                 Text(name).font(.system(size: 11)).foregroundStyle(Palette.secondary)
                 Text(value.map { ($0 > 0 ? sign : "") + Numbers.display($0, decimals: 0) } ?? "—")

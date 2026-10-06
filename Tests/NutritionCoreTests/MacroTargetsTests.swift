@@ -25,12 +25,13 @@ struct MacroTargetsTests {
     @Test func profileChangesRecalculateTargetsAndEatingOnlyChangesProgress() throws {
         var data = personal
         let initial = try #require(data.budget(on: date, eaten: 0)?.macroTargets)
-        #expect(initial.protein == 89) // 1780 kcal, resting expenditure.
+        // Watch mode without the day's activity: resting 1780 + sedentary allowance 356.
+        #expect(initial == MacroTargets(calories: 2136))
         #expect(data.budget(on: date, eaten: 800)?.macroTargets == initial)
         data.profile?.weight = 90
-        #expect(data.budget(on: date, eaten: 0)?.macroTargets?.protein == 94)
+        #expect(data.budget(on: date, eaten: 0)?.macroTargets == MacroTargets(calories: 2256)) // 1880 + 376
         data.profile?.height = 196
-        #expect(data.budget(on: date, eaten: 0)?.macroTargets?.protein == 99)
+        #expect(data.budget(on: date, eaten: 0)?.macroTargets == MacroTargets(calories: 2376)) // 1980 + 396
     }
 
     @Test func activityReplacementDeficitAndDateUseTheSameEnergyBudget() throws {
@@ -43,7 +44,7 @@ struct MacroTargetsTests {
         try data.mergeActivity([DailyActivity(day: DayKey.string(date), activeCalories: 300, updatedAt: date.addingTimeInterval(1), source: .manual)])
         #expect(data.budget(on: date, eaten: 500)?.macroTargets == MacroTargets(calories: 1872))
         let nextDay = try #require(Calendar.current.date(byAdding: .day, value: 1, to: date))
-        #expect(data.budget(on: nextDay, eaten: 0)?.macroTargets == MacroTargets(calories: 1602))
+        #expect(data.budget(on: nextDay, eaten: 0)?.macroTargets == MacroTargets(calories: 1602)) // Watch user: unburned calories are never added.
         #expect(data.budget(on: nextDay, eaten: 0)?.awaitingActivity == true)
     }
 
@@ -78,7 +79,7 @@ struct MacroTargetsTests {
         #expect(context.eaten.protein == 6 && context.eaten.fat == 6 && context.eaten.carbs == 10)
         let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(context)) as? [String: Any])
         let targets = try #require(json["macroTargets"] as? [String: Double])
-        #expect(targets["protein"] == 89)
+        #expect(targets["protein"] == MacroTargets(calories: 2136)?.protein)
         let missing = CoachContext(date: date, meals: [drink], personal: PersonalData())
         #expect(missing.macroTargets == nil)
         #expect(missing.eaten == context.eaten)
@@ -87,7 +88,7 @@ struct MacroTargetsTests {
     @Test func oldProfileLoadsWithoutMigrationAndProducesTargets() throws {
         let old = Data(#"{"version":1,"products":[],"activity":[],"profile":{"height":180,"weight":80,"age":30,"sex":"Мужской","activity":"Мало движения"}}"#.utf8)
         let data = try JSONDecoder().decode(PersonalData.self, from: old)
-        #expect(data.budget(on: date, eaten: 0)?.macroTargets == MacroTargets(calories: 1780))
+        #expect(data.budget(on: date, eaten: 0)?.macroTargets == MacroTargets(calories: 2136)) // 1780 + sedentary 356.
         #expect(try JSONDecoder().decode(PersonalData.self, from: JSONEncoder().encode(data)) == data)
     }
 }

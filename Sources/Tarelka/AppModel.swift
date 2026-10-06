@@ -19,6 +19,8 @@ struct IngredientDraft: Identifiable {
     var source: NutritionSource?
     var sourceName: String?
     var lookupQuery = ""
+    /// Values are the model's estimate; the user is invited to confirm them in the catalog.
+    var needsCatalogReview = false
     init() {}
     init(_ ingredient: Ingredient) {
         id = ingredient.id; name = ingredient.name; source = ingredient.source; sourceName = ingredient.name
@@ -44,6 +46,7 @@ final class AppModel: ObservableObject {
         didSet { photoPreview = photoData.flatMap { NSImage(data: $0) } }
     }
     @Published private(set) var photoPreview: NSImage?
+    @Published private(set) var isLoadingPhoto = false
     @Published var weight = ""
     @Published var weightMode = WeightMode.portion
     @Published var notes = ""
@@ -81,8 +84,14 @@ final class AppModel: ObservableObject {
     let recipes = RecipeStore()
     private var analysisTask: Task<Void, Never>?
     private var requestID = UUID()
+    private var photoTask: Task<Void, Never>?
+    private var photoRequestID = UUID()
+    private var photoPanel: NSOpenPanel?
     private var personalSubscription: AnyCancellable?
     private let publishesWidget: Bool
+    private var editingOriginalMeal: Meal?
+    private var retainedPhotoFilename: String?
+    private var requestedMealDay: Date?
 
     init(directory suppliedDirectory: URL? = nil) {
         publishesWidget = suppliedDirectory == nil && ProcessInfo.processInfo.environment["TARELKA_DATA_DIR"] == nil
@@ -98,11 +107,25 @@ final class AppModel: ObservableObject {
         personal = PersonalStore(directory: directory)
         coach = CoachStore(directory: directory)
         reminders = ReminderStore(directory: directory)
-        do { meals = try repository.load() }
-        catch { storageError = "Не удалось открыть дневник. Существующий файл сохранён: \(error.localizedDescription)" }
+        do { try PrivateStorage.secureExisting(in: directory) }
+        catch { storageError = "Не удалось защитить файлы дневника: \(error.localizedDescription)" }
+        do {
+            // If another copy holds the lock, damaged rows are still moved aside on the next save.
+            let recovered = try? repository.recoverUnreadable()
+            meals = try repository.load()
+            if let recovered, recovered > 0 {
+                errorMessage = "Повреждённых записей в дневнике: \(recovered). Остальные записи открыты, а повреждённые без изменений перенесены в файл meals-unreadable.json в папке дневника."
+            }
+        } catch { storageError = "Не удалось открыть дневник. Существующий файл сохранён: \(error.localizedDescription)" }
         hasKey = Keychain.containsKey()
         modelName = UserDefaults.standard.string(forKey: "visionModel") ?? OpenAIService.defaultModel
         provider = RecognitionProvider.restored(UserDefaults.standard.string(forKey: "recognitionProvider"))
+        #if DEBUG
+        // Design review: open a given screen on a demo journal (TARELKA_DATA_DIR) without clicking.
+        let screens: [String: Screen] = ["newMeal": .newMeal, "diary": .diary, "products": .products, "day": .day,
+                                         "week": .week, "coach": .coach, "recipes": .recipes, "settings": .settings]
+        if let start = ProcessInfo.processInfo.environment["TARELKA_START_SCREEN"].flatMap({ screens[$0] }) { screen = start }
+        #endif
         personalSubscription = personal.$data.dropFirst().sink { [weak self] _ in
             self?.reloadWidget()
         }
@@ -127,8 +150,8 @@ final class AppModel: ObservableObject {
         do {
             var updated = meals
             updated.append(repeated); updated.sort { $0.date > $1.date }
-            try repository.save(updated)
-            meals = updated; selectedDay = repeated.date
+            meals = try repository.save(updated, replacing: meals)
+            selectedDay = repeated.date
             notice = original.isDrink ? "Напиток добавлен повторно." : "Блюдо добавлено повторно."
             reloadWidget()
         } catch { errorMessage = "Не удалось повторить запись: \(error.localizedDescription)" }
@@ -151,9 +174,9 @@ final class AppModel: ObservableObject {
     var weightMatches: Bool { parsedWeight.map { abs(ingredientWeight - $0) <= 0.1 } ?? false }
     var canSave: Bool {
         hasResult && allIngredientsValid && weightMatches && !dishName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        && !isAnalyzing && !hasClarificationAnswers && storageError == nil
+        && !isAnalyzing && !isLoadingPhoto && !hasClarificationAnswers && storageError == nil
     }
-    var hasDraft: Bool { photoData != nil || hasResult || !weight.isEmpty || !notes.isEmpty }
+    var hasDraft: Bool { photoData != nil || isLoadingPhoto || hasResult || !weight.isEmpty || !notes.isEmpty }
     func meals(on date: Date) -> [Meal] { meals.filter { Calendar.current.isDate($0.date, inSameDayAs: date) } }
     func total(on date: Date) -> Nutrients { meals(on: date).reduce(Nutrients()) { $0 + $1.total } }
 
@@ -166,39 +189,75 @@ final class AppModel: ObservableObject {
     }
     func beginNewMeal(at date: Date = Date()) {
         guard editingID == nil, !hasDraft else { return }
-        mealDate = date; kind = .suggested(at: date)
+        mealDate = requestedMealDay ?? date; kind = .suggested(at: mealDate)
+    }
+    func openNewMeal(on date: Date) {
+        if editingID == nil, !hasDraft {
+            requestedMealDay = date
+            mealDate = date; kind = .suggested(at: date)
+        }
+        screen = .newMeal
     }
     func refreshNewMealDate(at date: Date = Date()) {
-        guard editingID == nil, !hasResult else { return }
+        guard editingID == nil, !hasResult, requestedMealDay == nil else { return }
         mealDate = date; kind = .suggested(at: date)
     }
     func choosePhoto() {
-        guard !isAnalyzing else { return }
+        guard !isAnalyzing, photoPanel == nil else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.jpeg, .png, .heic, .tiff, .webP]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.message = "Выберите фото блюда"
         panel.prompt = "Добавить фото"
-        if panel.runModal() == .OK, let url = panel.url { importPhoto(url) }
+        photoPanel = panel
+        let window = NSApp.keyWindow ?? NSApp.mainWindow
+        DispatchQueue.main.async { [weak self] in
+            let completion: (NSApplication.ModalResponse) -> Void = { response in
+                Task { @MainActor in
+                    self?.photoPanel = nil
+                    if response == .OK, let url = panel.url { self?.importPhoto(url) }
+                }
+            }
+            if let window { panel.beginSheetModal(for: window, completionHandler: completion) }
+            else { panel.begin(completionHandler: completion) }
+        }
     }
     func importPhoto(_ url: URL) {
         guard !isAnalyzing else { return }
-        do { setPhoto(try PhotoLoader.load(url: url)) }
-        catch { errorMessage = error.localizedDescription }
+        loadPhoto { try PhotoLoader.load(url: url) }
     }
     func pastePhoto() {
         guard !isAnalyzing else { return }
         let board = NSPasteboard.general
         if let data = board.data(forType: .png) ?? board.data(forType: .tiff) {
-            do { setPhoto(try PhotoLoader.prepare(data)) }
-            catch { errorMessage = error.localizedDescription }
+            loadPhoto { try PhotoLoader.prepare(data) }
         } else if let urls = board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], let url = urls.first, url.isFileURL {
             importPhoto(url)
         } else { errorMessage = "В буфере обмена нет фотографии. Скопируйте изображение или выберите файл." }
     }
+    private func loadPhoto(_ work: @escaping @Sendable () throws -> Data) {
+        cancelPhotoImport()
+        let token = photoRequestID
+        isLoadingPhoto = true; errorMessage = nil
+        photoTask = Task {
+            do {
+                let bytes = try await PhotoLoader.performAsync(work)
+                guard !Task.isCancelled, photoRequestID == token else { return }
+                setPhoto(bytes)
+            } catch {
+                guard !Task.isCancelled, photoRequestID == token else { return }
+                errorMessage = error.localizedDescription
+            }
+            if photoRequestID == token { isLoadingPhoto = false; photoTask = nil }
+        }
+    }
+    private func cancelPhotoImport() {
+        photoRequestID = UUID(); photoTask?.cancel(); photoTask = nil; isLoadingPhoto = false
+    }
     private func setPhoto(_ data: Data) {
         skipClarifications()
+        retainedPhotoFilename = nil
         photoData = data
         // A different photo invalidates prior recognition; it must never inherit an unrelated meal's result.
         hasResult = false; drafts = []; assumptions = []; dishName = ""; isEstimate = false
@@ -207,10 +266,13 @@ final class AppModel: ObservableObject {
     }
     func removePhoto() {
         guard !isAnalyzing else { return }
+        cancelPhotoImport()
         skipClarifications()
+        retainedPhotoFilename = nil
         photoData = nil
     }
     func startManual() {
+        guard !isLoadingPhoto else { return }
         refreshNewMealDate()
         skipClarifications()
         let initialWeight = parsedWeight
@@ -258,7 +320,8 @@ final class AppModel: ObservableObject {
         let useCatalog = useCatalog ?? (UserDefaults.standard.object(forKey: "useFoodCatalog") as? Bool ?? true)
         drafts = components.enumerated().map { index, ingredient in
             var draft = IngredientDraft(ingredient)
-            draft.lookupQuery = index < queries.count ? queries[index] : ingredient.name
+            let query = index < queries.count ? queries[index] : ingredient.name
+            draft.lookupQuery = query
             guard useCatalog else { return draft }
             let exactProducts = personal.data.products.filter {
                 $0.unit == .grams && FoodCatalog.normalize($0.name) == FoodCatalog.normalize(ingredient.name)
@@ -268,14 +331,20 @@ final class AppModel: ObservableObject {
                 saved.source = product.source ?? NutritionSource(title: "Мои продукты", detail: product.name, per100: product.per100)
                 return IngredientDraft(saved)
             }
-            // A model's partial English query is only a suggestion. The user confirms preparation.
-            draft.calories = ""; draft.protein = ""; draft.fat = ""; draft.carbs = ""
+            // Only an unambiguous catalog name replaces the estimate; a partial query is never auto-picked.
+            if let food = FoodCatalog.shared.exact(query) ?? FoodCatalog.shared.exact(ingredient.name) {
+                var matched = IngredientDraft(food.ingredient(grams: ingredient.grams, name: ingredient.name))
+                matched.lookupQuery = query
+                return matched
+            }
+            // Keep the model's estimate so totals are visible, and ask the user to confirm preparation.
+            draft.needsCatalogReview = true
             return draft
         }
     }
     func analyze(refining: Bool = false) {
         refreshNewMealDate()
-        guard !isAnalyzing, let photo = photoData, let grams = parsedWeight else { return }
+        guard !isAnalyzing, !isLoadingPhoto, let photo = photoData, let grams = parsedWeight else { return }
         guard !refining || hasClarificationAnswers else { return }
         let selectedProvider = provider
         var key = ""
@@ -338,15 +407,18 @@ final class AppModel: ObservableObject {
     }
     func resetDraft() {
         cancelAnalysis()
+        cancelPhotoImport()
         skipClarifications()
         photoData = nil; weight = ""; notes = ""; dishName = ""; kind = .suggested(); mealDate = Date()
         drafts = []; assumptions = []; hasResult = false; isEstimate = false; editingID = nil
+        editingOriginalMeal = nil; retainedPhotoFilename = nil; requestedMealDay = nil
         weightMode = .portion
         errorMessage = nil; notice = nil
     }
     func edit(_ meal: Meal) {
         if meal.isDrink { drinkEditor = DrinkDraft(meal: meal); return }
         resetDraft()
+        editingOriginalMeal = meal; retainedPhotoFilename = meal.photoFilename
         editingID = meal.id; weight = Numbers.input(meal.weight); notes = meal.notes; dishName = meal.name
         kind = meal.kind; mealDate = meal.date; drafts = meal.ingredients.map(IngredientDraft.init)
         assumptions = meal.assumptions; hasResult = true; isEstimate = meal.isEstimate
@@ -359,20 +431,19 @@ final class AppModel: ObservableObject {
     }
     func saveMeal() {
         guard canSave, let grams = parsedWeight else { return }
-        let previous = meals.first { $0.id == editingID }
+        let previous = editingOriginalMeal ?? meals.first { $0.id == editingID }
         var newPhoto: String?
         do {
             if let photoData { newPhoto = try repository.savePhoto(photoData) }
             let meal = Meal(id: editingID ?? UUID(), date: mealDate, kind: kind,
                             name: dishName.trimmingCharacters(in: .whitespacesAndNewlines), weight: grams,
                             ingredients: ingredients, notes: notes, assumptions: assumptions,
-                            isEstimate: isEstimate, photoFilename: newPhoto)
+                            isEstimate: isEstimate, photoFilename: newPhoto ?? retainedPhotoFilename)
             var updated = meals.filter { $0.id != meal.id }
             updated.append(meal); updated.sort { $0.date > $1.date }
-            try repository.save(updated)
-            meals = updated
+            meals = try repository.save(updated, replacing: baseline(for: previous))
             reloadWidget()
-            repository.removePhoto(previous?.photoFilename)
+            if previous?.photoFilename != meal.photoFilename { repository.removePhoto(previous?.photoFilename) }
             selectedDay = meal.date
             resetDraft(); screen = .diary; notice = "Блюдо сохранено в дневник."
         } catch {
@@ -384,16 +455,22 @@ final class AppModel: ObservableObject {
         guard storageError == nil else { return }
         let updated = meals.filter { $0.id != meal.id }
         do {
-            try repository.save(updated); meals = updated
+            meals = try repository.save(updated, replacing: baseline(for: meal))
             reloadWidget()
             repository.removePhoto(meal.photoFilename)
             if editingID == meal.id { resetDraft() }
         } catch { errorMessage = "Не удалось удалить запись: \(error.localizedDescription)" }
     }
-    func saveDrink(_ value: Meal, photoChange: DrinkPhotoChange = .unchanged) throws {
+    // Keep the version originally opened by the editor, even if a later menu action
+    // refreshes `meals` from another running copy in the meantime.
+    private func baseline(for original: Meal?) -> [Meal] {
+        guard let original else { return meals }
+        return meals.filter { $0.id != original.id } + [original]
+    }
+    func saveDrink(_ value: Meal, photoChange: DrinkPhotoChange = .unchanged, original: Meal? = nil) throws {
         guard storageError == nil, value.isDrink else { throw FoodError.invalidIngredient }
         try value.validate()
-        let previous = meals.first { $0.id == value.id }
+        let previous = original ?? meals.first { $0.id == value.id }
         var meal = value
         var newPhoto: String?
         do {
@@ -406,8 +483,8 @@ final class AppModel: ObservableObject {
             }
             var updated = meals.filter { $0.id != meal.id }
             updated.append(meal); updated.sort { $0.date > $1.date }
-            try repository.save(updated)
-            meals = updated; selectedDay = meal.date; screen = .diary
+            meals = try repository.save(updated, replacing: baseline(for: previous))
+            selectedDay = meal.date; screen = .diary
             reloadWidget()
             if previous?.photoFilename != meal.photoFilename { repository.removePhoto(previous?.photoFilename) }
             notice = "Напиток сохранён в дневник."
@@ -418,9 +495,9 @@ final class AppModel: ObservableObject {
     }
     func saveSettings(key: String, model: String) -> Bool {
         do {
-            if !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { try Keychain.save(key) }
             let cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanModel.isEmpty else { return false }
+            if !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { try Keychain.save(key) }
             modelName = cleanModel; UserDefaults.standard.set(cleanModel, forKey: "visionModel")
             hasKey = Keychain.containsKey(); notice = "Настройки сохранены."
             return true

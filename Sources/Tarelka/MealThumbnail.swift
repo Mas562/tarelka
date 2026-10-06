@@ -38,14 +38,16 @@ struct MealThumbnail: View {
     }
     var body: some View {
         let request = Request(url: url, pixels: Int(ceil(84 * min(max(displayScale, 1), 4))))
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         ZStack {
-            Palette.mint.opacity(0.5)
+            LinearGradient(colors: [Palette.mint.opacity(0.9), Palette.mint.opacity(0.35)], startPoint: .topLeading, endPoint: .bottomTrailing)
             if let image {
                 Image(decorative: image, scale: displayScale).resizable().scaledToFill()
             } else {
-                Image(systemName: symbol).font(.system(size: 23, weight: .light)).foregroundStyle(Palette.green)
+                Image(systemName: symbol).font(.system(size: 24, weight: .regular)).foregroundStyle(Palette.green)
             }
-        }.frame(width: 84, height: 84).clipShape(RoundedRectangle(cornerRadius: 13))
+        }.frame(width: 84, height: 84).clipShape(shape)
+            .overlay(shape.strokeBorder(Palette.edge.opacity(0.7), lineWidth: 0.8))
             .task(id: request) {
                 image = nil
                 guard let url = request.url else { return }

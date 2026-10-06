@@ -61,7 +61,8 @@ struct MenuBarDashboard: View {
                             .font(.system(size: 11))
                             .foregroundStyle(muted)
                         if budget.creditsActivity {
-                            Label(budget.awaitingActivity ? "Ожидаем данные часов" : "+\(Numbers.display(budget.creditedActivity, decimals: 0)) ккал активности",
+                            Label(budget.awaitingActivity && budget.creditedActivity == 0 ? "Ожидаем данные часов"
+                                  : "+\(Numbers.display(budget.creditedActivity, decimals: 0)) ккал активности\(budget.awaitingActivity ? " ≈" : "")",
                                   systemImage: "figure.run")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(mint)

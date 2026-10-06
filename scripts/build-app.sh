@@ -12,6 +12,12 @@ iconutil -c icns .build/AppIcon.iconset -o packaging/AppIcon.icns
 TARELKA_BIN_DIR=$(swift build --build-system native -c release --scratch-path .build --show-bin-path)
 # Sign outside iCloud Documents so Finder cannot race the signature with metadata.
 TARELKA_STAGE=$(mktemp -d /private/tmp/tarelka-build.XXXXXX)
+TARELKA_VERIFY_DIR=""
+cleanup() {
+    rm -rf "$TARELKA_STAGE"
+    if [[ -n "$TARELKA_VERIFY_DIR" ]]; then rm -rf "$TARELKA_VERIFY_DIR"; fi
+}
+trap cleanup EXIT
 TARELKA_BUNDLE="$TARELKA_STAGE/Тарелка.app"
 mkdir -p "$TARELKA_BUNDLE/Contents/MacOS" "$TARELKA_BUNDLE/Contents/Resources" "$TARELKA_BUNDLE/Contents/PlugIns/TarelkaWidget.appex/Contents/MacOS"
 cp "$TARELKA_BIN_DIR/Tarelka" "$TARELKA_BUNDLE/Contents/MacOS/Tarelka"
@@ -34,5 +40,9 @@ ditto -c -k --norsrc --noextattr --keepParent "$TARELKA_BUNDLE" "$PWD/dist/Та�
 ditto --norsrc --noextattr "$TARELKA_BUNDLE" "$PWD/dist/Тарелка.app"
 xattr -rd com.apple.FinderInfo "$PWD/dist/Тарелка.app" 2>/dev/null || true
 xattr -rd com.apple.ResourceFork "$PWD/dist/Тарелка.app" 2>/dev/null || true
-codesign --verify --deep --strict "$PWD/dist/Тарелка.app"
-print "Готово: $PWD/dist/Тарелка.app"
+# iCloud Drive may later add Finder attributes to the loose app copy. Verify the
+# distributable archive after extraction outside iCloud, as users will install it.
+TARELKA_VERIFY_DIR=$(mktemp -d /private/tmp/tarelka-verify.XXXXXX)
+ditto -x -k "$PWD/dist/Тарелка.zip" "$TARELKA_VERIFY_DIR"
+codesign --verify --deep --strict "$TARELKA_VERIFY_DIR/Тарелка.app"
+print "Готово: $PWD/dist/Тарелка.zip"

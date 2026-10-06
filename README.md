@@ -54,6 +54,10 @@
 
 ![Добавление блюда по фото и весу](docs/screenshots/new-meal.png)
 
+### Тёмная тема
+
+![Мой день в тёмной теме](docs/screenshots/dashboard-dark.png)
+
 ## Начать
 
 ### Готовая версия для Apple Silicon

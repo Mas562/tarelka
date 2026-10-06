@@ -42,6 +42,14 @@ public enum NutritionLabelParser {
     public static func parse(text: String) -> LabelScan {
         let source = text.lowercased().replacingOccurrences(of: "ё", with: "е")
             .replacingOccurrences(of: "\u{00a0}", with: " ")
+        // A heading elsewhere on the package cannot turn serving values into per-100 values.
+        // Mixed tables require a crop of the per-100 column or manual confirmation.
+        let serving = #"\b(?:(?:на|в)\s+(?:(?:одну|одной|1)\s+)?(?:порци\p{L}*|упаковк\p{L}*)|per\s+(?:serving|portion|pack)\b|serving\s+size\b)"#
+        let otherAmounts = matches(#"\b(?:на|в|per)\s*(\d+(?:[.,]\d+)?)\s*(?:мл|ml|г|гр|g)(?!\p{L})"#, source)
+            .contains { Numbers.parse((source as NSString).substring(with: $0.range(at: 1))) != 100 }
+        guard matches(serving, source).isEmpty, !otherAmounts else {
+            return LabelScan(text: text, unit: nil, calories: nil, protein: nil, fat: nil, carbs: nil)
+        }
         // A package's net weight (e.g. “100 г”) is not a nutrition serving basis.
         let bases = source.components(separatedBy: .newlines).flatMap { line in
             matches(basis, line).filter { match in

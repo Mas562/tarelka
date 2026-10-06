@@ -5,7 +5,7 @@ import NutritionCore
 
 @MainActor
 struct NewFeaturesTests {
-    @Test func databaseModeDoesNotUseInventedMacrosAndPreservesWeights() throws {
+    @Test func databaseModeKeepsEstimateForReviewAndPreservesWeights() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = AppModel(directory: directory)
@@ -13,10 +13,11 @@ struct NewFeaturesTests {
                           Ingredient(name: "Сыр с упаковки", grams: 40, per100: Nutrients(calories: 999))]
         _ = model.personal.saveProduct(SavedProduct(name: "Сыр с упаковки", per100: Nutrients(calories: 350, protein: 25, fat: 27, carbs: 1)))
         model.applyRecognizedComponents(components, queries: ["chicken fried", "cheese"], useCatalog: true)
-        #expect(model.drafts[0].calories.isEmpty && model.drafts[0].ingredient == nil)
+        // No unambiguous catalog match: the estimate stays visible and is flagged for confirmation.
+        #expect(model.drafts[0].calories == "555" && model.drafts[0].needsCatalogReview)
         #expect(model.drafts[0].grams == "70")
-        #expect(model.drafts[1].calories == "350" && model.drafts[1].grams == "40")
-        #expect(!model.allIngredientsValid)
+        #expect(model.drafts[1].calories == "350" && model.drafts[1].grams == "40" && !model.drafts[1].needsCatalogReview)
+        #expect(model.allIngredientsValid)
         let choice = try #require(FoodCatalog.shared.search("chicken fried").first)
         let oldID = model.drafts[0].id
         model.applyCatalog(choice, grams: 70, replacing: oldID)
@@ -24,6 +25,11 @@ struct NewFeaturesTests {
         #expect(model.ingredients[0].per100 == choice.per100)
         #expect(model.ingredientWeight == 110)
         #expect(model.ingredients[0].source == choice.source)
+        #expect(!model.drafts[0].needsCatalogReview)
+        let rice = try #require(FoodCatalog.shared.foods.first { $0.name == "Rice, white, long-grain, regular, enriched, cooked" })
+        model.applyRecognizedComponents([Ingredient(name: "Рис", grams: 150, per100: Nutrients(calories: 999))],
+                                        queries: [rice.name], useCatalog: true)
+        #expect(model.ingredients.first?.per100 == rice.per100 && model.drafts[0].name == "Рис")
         model.applyRecognizedComponents(components, queries: [], useCatalog: false)
         #expect(model.drafts[0].calories == "555")
     }

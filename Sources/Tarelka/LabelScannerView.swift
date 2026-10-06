@@ -116,7 +116,7 @@ struct LabelScannerView: View {
                 busy = true; error = nil; scan = nil; confirmed = false
                 calories = ""; protein = ""; fat = ""; carbs = ""; preview = nil
                 do {
-                    let data = try await Task.detached(priority: .userInitiated) { try PhotoLoader.load(url: job.url, maxPixelSize: 2800) }.value
+                    let data = try await PhotoLoader.performAsync { try PhotoLoader.load(url: job.url, maxPixelSize: 2800) }
                     try Task.checkCancellation()
                     preview = NSImage(data: data)
                     let result = try await NutritionLabelReader.read(data)

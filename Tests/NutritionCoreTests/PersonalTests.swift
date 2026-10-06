@@ -78,6 +78,14 @@ struct PersonalTests {
         #expect(data.activity[0].activeCalories == 600)
         #expect(!data.activity.contains { $0.day == "2026-09-07" })
     }
+    @Test func malformedExistingActivityCannotCrashMerge() throws {
+        var data = PersonalData()
+        let existing = DailyActivity(day: "2026-09-08", activeCalories: 100, updatedAt: Date(), source: .manual)
+        data.activity = [existing, existing]
+        let incoming = DailyActivity(day: "2026-09-09", activeCalories: 200, updatedAt: Date(), source: .manual)
+        #expect(throws: PersonalError.self) { try data.mergeActivity([incoming]) }
+        #expect(data.activity.count == 2)
+    }
     @Test func transferFileAndDateValidation() throws {
         let json = Data(#"{"version":1,"days":[{"date":"2026-09-08","active_kcal":512,"updated_at":"2026-09-08T18:15:00+05:00"}]}"#.utf8)
         let result = try HealthActivityImporter.readJSON(json)

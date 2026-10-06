@@ -3,7 +3,9 @@ import Foundation
 public struct OpenAIService: Sendable {
     public static let defaultModel = "gpt-5.4-mini"
     private let session: URLSession
-    public init(session: URLSession = .shared) { self.session = session }
+    private static let defaultSession = URLSession(configuration: .ephemeral,
+                                                    delegate: NoRedirectSessionDelegate(), delegateQueue: nil)
+    public init(session: URLSession? = nil) { self.session = session ?? Self.defaultSession }
 
     public func analyze(jpeg: Data, weight: Double, notes: String, key: String,
                         model: String = defaultModel) async throws -> FoodEstimate {

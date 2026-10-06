@@ -60,7 +60,7 @@ struct DayView: View {
                             HStack(alignment: .top, spacing: 10) {
                                 metric(personal.data.manualTarget != nil ? "Твоя база" : budget.creditsActivity ? "Покой" : "Норма", value: budget.base, sign: "", color: Palette.ink)
                                 if budget.creditsActivity {
-                                    metric("Активность", value: budget.active, sign: "+", color: Palette.blue)
+                                    metric("Активность", value: budget.active ?? (budget.provisionalActivity > 0 ? budget.provisionalActivity : nil), sign: "+", color: Palette.blue)
                                 }
                                 metric("Съедено", value: budget.eaten, sign: "−", color: Palette.green)
                             }
@@ -69,7 +69,7 @@ struct DayView: View {
                                     .font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.violet)
                             }
                             if budget.awaitingActivity {
-                                Text("Ждём данные активности. Пока остаток рассчитан только от базы.")
+                                Text(budget.provisionalActivity > 0 ? "Ждём данные активности. Пока к покою прибавлена минимальная бытовая активность." : "Ждём данные активности. Пока остаток рассчитан только от базы.")
                                     .font(.system(size: 11)).foregroundStyle(Palette.secondary)
                             }
                         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -218,7 +218,9 @@ struct ProfileEditor: View {
                                 Text("≈ \(Numbers.display(preview.target, decimals: 0)) ккал").font(.system(size: 32, weight: .semibold, design: .rounded)).animatedNumber(preview.target)
                                 Text("База \(Numbers.display(preview.base, decimals: 0)) + активность \(Numbers.display(preview.creditedActivity, decimals: 0)) − дефицит \(Numbers.display(preview.deficit, decimals: 0))")
                                     .font(.system(size: 11)).foregroundStyle(Palette.secondary)
-                                Text(preview.awaitingActivity ? "Предварительно: данных активности за сегодня ещё нет." : "Ориентир с уже полученной активностью за сегодня.")
+                                Text(!preview.awaitingActivity ? "Ориентир с уже полученной активностью за сегодня."
+                                     : preview.provisionalActivity > 0 ? "Предварительно: данных часов за сегодня нет, учтена минимальная бытовая активность (покой × 1,2)."
+                                     : "Предварительно: данных активности за сегодня ещё нет.")
                                     .font(.system(size: 11)).foregroundStyle(Palette.secondary)
                                 if let targets = preview.macroTargets {
                                     Divider().padding(.vertical, 5)
@@ -236,7 +238,7 @@ struct ProfileEditor: View {
                     }
                     Text("Расход в покое оценивается по Миффлину — Сан Жеору. Это ориентир, а не точное измерение потребности. Расчёт для взрослых; не предназначен для беременности, грудного вскармливания или лечебной диеты. Изменение веса за месяц не гарантируется.")
                         .font(.system(size: 11)).foregroundStyle(Palette.secondary)
-                    Link("О формуле", destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/2305711/")!).font(.system(size: 11))
+                    Link("О формуле", destination: URL(string: "https://pubmed.ncbi.nlm.nih.gov/2305711/")!).foregroundStyle(Palette.green).font(.system(size: 11))
                 }.padding(.vertical, 4).padding(.horizontal, 2)
             }
             if let error = personal.error { Text(error).font(.system(size: 11)).foregroundStyle(Palette.orange) }
@@ -273,7 +275,7 @@ struct WatchHelpView: View {
                         Text("2. В «Здоровье» нажмите свой профиль → «Экспортировать все данные о здоровье». Передайте ZIP на Mac через AirDrop.")
                         Text("3. Откройте ZIP в Finder. В «Тарелке» нажмите «Импорт с iPhone…» и выберите apple_health_export/export.xml.")
                         Text("Импортируются только дневные итоги активных калорий. Повторный импорт обновляет дни. Для свежих показаний повторите экспорт; это не постоянная синхронизация.")
-                        Link("Инструкция Apple по экспорту", destination: URL(string: "https://support.apple.com/en-gb/guide/iphone/iph5ede58c3d/ios")!)
+                        Link("Инструкция Apple по экспорту", destination: URL(string: "https://support.apple.com/en-gb/guide/iphone/iph5ede58c3d/ios")!).foregroundStyle(Palette.green)
                     }.font(.system(size: 12)).foregroundStyle(Palette.secondary).padding(.top, 12)
                 }
                 DisclosureGroup("Автообновление из файла на Mac") {

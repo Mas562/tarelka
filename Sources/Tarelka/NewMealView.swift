@@ -88,6 +88,7 @@ struct NewMealView: View {
                                 .accessibilityLabel("Убрать фото").disabled(model.isAnalyzing)
                         }
                         Spacer()
+                        if model.isLoadingPhoto { ProgressView("Подготавливаем фото…").controlSize(.small) }
                         Button("Заменить фото") { model.choosePhoto() }.buttonStyle(SoftButton()).disabled(model.isAnalyzing)
                     }.padding(14)
                 } else {
@@ -110,6 +111,7 @@ struct NewMealView: View {
                         Text("Перетащите снимок блюда сюда\nили выберите его на Mac")
                             .font(.system(size: 12)).foregroundStyle(Palette.secondary).multilineTextAlignment(.center).lineSpacing(4)
                         Button("Выбрать фото") { model.choosePhoto() }.buttonStyle(SoftButton())
+                        if model.isLoadingPhoto { ProgressView("Подготавливаем фото…").controlSize(.small) }
                         Text("JPEG, PNG, HEIC · до 40 МБ").font(.system(size: 9)).foregroundStyle(Palette.secondary)
                     }.padding(25)
                 }
@@ -182,7 +184,7 @@ struct NewMealView: View {
             } else {
                 Button { model.analyze() } label: {
                     Label(model.hasResult ? "Распознать заново" : "Рассчитать по фото", systemImage: "sparkles")
-                }.buttonStyle(PrimaryButton()).disabled(model.photoData == nil || model.parsedWeight == nil)
+                }.buttonStyle(PrimaryButton()).disabled(model.photoData == nil || model.parsedWeight == nil || model.isLoadingPhoto)
             }
             Text(model.provider == .local
                  ? "\(OllamaService.displayName) · бесплатно на этом Mac."
@@ -192,7 +194,7 @@ struct NewMealView: View {
             if !model.hasResult {
                 Button("Заполнить вручную") { model.startManual() }
                     .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.green)
-                    .frame(maxWidth: .infinity).disabled(model.isAnalyzing)
+                    .frame(maxWidth: .infinity).disabled(model.isAnalyzing || model.isLoadingPhoto)
             }
         }
     }
@@ -336,13 +338,13 @@ struct IngredientEditor: View {
                         .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 24)
                         .help("Действия с ингредиентом").accessibilityLabel("Действия: \(draft.name)")
                 }.font(.system(size: 11))
-                if !draft.lookupQuery.isEmpty && draft.calories.isEmpty {
+                if draft.needsCatalogReview {
                     Button {
                         replacingID = draft.id; initialGrams = draft.grams
                         catalogQuery = draft.lookupQuery.isEmpty ? draft.name : draft.lookupQuery; showCatalog = true
-                    } label: { Label("Выбрать КБЖУ для «\(draft.name)» из базы", systemImage: "books.vertical") }
+                    } label: { Label("Сверить КБЖУ «\(draft.name)» с базой", systemImage: "books.vertical") }
                         .buttonStyle(.link).font(.system(size: 11))
-                    Text("Нейросеть определила продукт. Подтверди вариант в базе или заполни КБЖУ с упаковки.")
+                    Text("КБЖУ оценены нейросетью. Для точности выбери вариант в базе или впиши данные с упаковки.")
                         .font(.system(size: 10)).foregroundStyle(Palette.secondary)
                 }
                 if let source = draft.ingredient?.source {

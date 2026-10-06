@@ -20,7 +20,7 @@ struct DiaryView: View {
                     }
                     Spacer()
                     Menu {
-                        Button("Блюдо") { model.screen = .newMeal }
+                        Button("Блюдо") { model.openNewMeal(on: model.selectedDay) }
                         Button("Напиток") { model.drinkEditor = DrinkDraft(date: model.selectedDay) }
                     } label: { Label("Добавить", systemImage: "plus") }.menuStyle(.borderlessButton).fixedSize()
                 }
@@ -66,7 +66,7 @@ struct DiaryView: View {
             Text("Здесь появятся блюда и напитки").font(.system(size: 20, weight: .medium)).tracking(-0.4)
             Text("За этот день пока нет записей.\nДобавьте первую порцию, когда будете готовы.")
                 .font(.system(size: 12)).foregroundStyle(Palette.secondary).multilineTextAlignment(.center).lineSpacing(4)
-            Button("Добавить блюдо") { model.screen = .newMeal }.buttonStyle(SoftButton())
+            Button("Добавить блюдо") { model.openNewMeal(on: model.selectedDay) }.buttonStyle(SoftButton())
         }.padding(.vertical, 46).frame(maxWidth: .infinity)
     }
     private func mealCard(_ meal: Meal) -> some View {

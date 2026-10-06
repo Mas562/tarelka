@@ -8,6 +8,9 @@ struct PreferencesView: View {
     @State private var visionModel = OpenAIService.defaultModel
     @State private var saved = false
     @State private var showAdvanced = false
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 25) {
@@ -92,14 +95,14 @@ struct PreferencesView: View {
                             .font(.system(size: 12)).foregroundStyle(Palette.secondary).lineSpacing(4)
                         Button("Показать папку дневника") {
                             do {
-                                try FileManager.default.createDirectory(at: model.repository.directory, withIntermediateDirectories: true)
+                                try PrivateStorage.prepareDirectory(model.repository.directory)
                                 NSWorkspace.shared.open(model.repository.directory)
                             } catch { model.errorMessage = error.localizedDescription }
                         }.buttonStyle(SoftButton())
                     }
                 }
                 HStack {
-                    Text("Тарелка 2.3 · Сделано для спокойного учёта еды").font(.system(size: 10)).foregroundStyle(Palette.secondary)
+                    Text("Тарелка \(appVersion) · Сделано для спокойного учёта еды").font(.system(size: 10)).foregroundStyle(Palette.secondary)
                     Spacer()
                     Button("Вернуться к блюду") { model.screen = .newMeal }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Palette.green)
                 }

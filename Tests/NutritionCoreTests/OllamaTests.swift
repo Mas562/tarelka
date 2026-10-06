@@ -105,7 +105,7 @@ struct OllamaTests {
         defer { session.invalidateAndCancel() }
         let request = URLRequest(url: URL(string: "https://example.com/photo")!)
         let response = HTTPURLResponse(url: URL(string: "http://127.0.0.1:11434/api/chat")!, statusCode: 307, httpVersion: nil, headerFields: nil)!
-        LocalOnlySessionDelegate().urlSession(session, task: session.dataTask(with: request), willPerformHTTPRedirection: response, newRequest: request) { redirected in
+        NoRedirectSessionDelegate().urlSession(session, task: session.dataTask(with: request), willPerformHTTPRedirection: response, newRequest: request) { redirected in
             #expect(redirected == nil)
         }
     }

@@ -106,7 +106,7 @@ public enum ActivityAccounting: String, Codable, CaseIterable, Sendable {
     case watch = "Покой + Apple Watch"
     case estimated = "Обычная активность"
     public var detail: String {
-        self == .watch ? "Расход в покое + активные калории за выбранный день. Коэффициент активности не используется."
+        self == .watch ? "Расход в покое + активные калории за выбранный день. Если активность ещё ни разу не вносилась, к покою прибавляется минимальная бытовая активность (×1,2)."
         : "Расход в покое × коэффициент активности. Калории часов показаны отдельно и повторно не прибавляются."
     }
 }
@@ -126,7 +126,10 @@ public struct DayBudget: Equatable, Sendable {
     public let creditsActivity: Bool
     public let deficit: Double
     public let eaten: Double
-    public var creditedActivity: Double { creditsActivity ? (active ?? 0) : 0 }
+    /// Sedentary allowance used until the day's activity arrives, so a missing import
+    /// (or no Apple Watch at all) never leaves the target at resting expenditure alone.
+    public var provisionalActivity: Double = 0
+    public var creditedActivity: Double { creditsActivity ? (active ?? provisionalActivity) : 0 }
     public var target: Double { base + creditedActivity - deficit }
     public var remaining: Double { target - eaten }
     public var netEaten: Double { eaten - creditedActivity }
@@ -155,7 +158,11 @@ public struct PersonalData: Codable, Equatable, Sendable {
         let day = DayKey.string(date, timeZone: timeZone)
         let active = activity.first { $0.day == day }?.activeCalories
         let adds = settings.accounting == .watch
-        let maintenance = base + (adds ? (active ?? 0) : 0)
+        // Without any activity history (no Apple Watch), resting expenditure alone is never a whole day's need.
+        // Someone who does log activity sees only calories actually burned; a manual base is the user's own choice.
+        let provisional = adds && active == nil && manualTarget == nil && activity.isEmpty
+            ? (base * (ActivityLevel.low.factor - 1)).rounded() : 0
+        let maintenance = base + (adds ? (active ?? provisional) : 0)
         var deficit = 0.0
         // A manually supplied target is already the user's goal. Never subtract a second deficit.
         if settings.goal == .gentleLoss, manualTarget == nil, let profile,
@@ -163,7 +170,8 @@ public struct PersonalData: Codable, Equatable, Sendable {
             let floor = profile.sex == .male ? 1500.0 : 1200.0
             deficit = max(0, min(300, maintenance * 0.1, maintenance - floor)).rounded()
         }
-        return DayBudget(base: base, active: active, creditsActivity: adds, deficit: deficit, eaten: eaten)
+        return DayBudget(base: base, active: active, creditsActivity: adds, deficit: deficit, eaten: eaten,
+                         provisionalActivity: provisional)
     }
     public func validate() throws {
         guard (1...2).contains(version) else { throw FoodError.storageVersion }
@@ -173,20 +181,73 @@ public struct PersonalData: Codable, Equatable, Sendable {
               (dietaryNotes?.count ?? 0) <= 1000,
               activity.allSatisfy(\.isValid), Set(activity.map(\.day)).count == activity.count else { throw PersonalError.invalidData }
     }
-    public mutating func mergeActivity(_ incoming: [DailyActivity]) throws {
+    public mutating func mergeActivity(_ incoming: [DailyActivity], preferIncoming: Bool = false) throws {
         guard incoming.allSatisfy(\.isValid), Set(incoming.map(\.day)).count == incoming.count else { throw PersonalError.invalidActivity }
+        guard activity.allSatisfy(\.isValid), Set(activity.map(\.day)).count == activity.count else { throw PersonalError.invalidData }
         var byDay = Dictionary(uniqueKeysWithValues: activity.map { ($0.day, $0) })
         for item in incoming {
-            if let previous = byDay[item.day], previous.updatedAt > item.updatedAt { continue }
+            if !preferIncoming, let previous = byDay[item.day], previous.updatedAt > item.updatedAt { continue }
             byDay[item.day] = item
         }
         activity = byDay.values.sorted { $0.day > $1.day }
     }
+    /// Drops only the parts that fail validation. Used to recover a partly damaged file.
+    public mutating func discardInvalid() {
+        var ids = Set<UUID>(); products = products.filter { $0.isValid && ids.insert($0.id).inserted }
+        var days = Set<String>(); activity = activity.filter { $0.isValid && days.insert($0.day).inserted }
+        if profile?.isValid == false { profile = nil }
+        if let target = manualTarget, !(target.isFinite && (500...10_000).contains(target)) { manualTarget = nil }
+        if let notes = dietaryNotes, notes.count > 1000 { dietaryNotes = String(notes.prefix(1000)) }
+    }
+    /// Applies only this window's changes on top of what another copy has saved meanwhile.
+    /// Activity keeps the newest value per day; any other field edited in both copies is a conflict.
+    public static func merge(base: PersonalData, proposed: PersonalData, current: PersonalData) throws -> PersonalData {
+        var result = current
+        func field<T: Equatable>(_ key: WritableKeyPath<PersonalData, T>) throws {
+            guard base[keyPath: key] != proposed[keyPath: key] else { return }
+            guard current[keyPath: key] == base[keyPath: key] || current[keyPath: key] == proposed[keyPath: key]
+            else { throw PersonalError.storageConflict }
+            result[keyPath: key] = proposed[keyPath: key]
+        }
+        try field(\.profile); try field(\.manualTarget); try field(\.budgetSettings)
+        try field(\.linkedFileBookmark); try field(\.linkedFileName)
+        try field(\.coachEnabled); try field(\.dietaryNotes)
+        if base.products != proposed.products {
+            let before = Dictionary(base.products.map { ($0.id, $0) }) { first, _ in first }
+            let after = Dictionary(proposed.products.map { ($0.id, $0) }) { first, _ in first }
+            var products = Dictionary(current.products.map { ($0.id, $0) }) { first, _ in first }
+            for id in Set(before.keys).union(after.keys) where before[id] != after[id] {
+                guard products[id] == before[id] || products[id] == after[id] else { throw PersonalError.storageConflict }
+                products[id] = after[id]
+            }
+            result.products = products.values.sorted {
+                let order = $0.name.localizedStandardCompare($1.name)
+                return order == .orderedSame ? $0.id.uuidString < $1.id.uuidString : order == .orderedAscending
+            }
+        }
+        if base.activity != proposed.activity {
+            let before = Dictionary(base.activity.map { ($0.day, $0) }) { first, _ in first }
+            let after = Dictionary(proposed.activity.map { ($0.day, $0) }) { first, _ in first }
+            var days = Dictionary(current.activity.map { ($0.day, $0) }) { first, _ in first }
+            for day in Set(before.keys).union(after.keys) where before[day] != after[day] {
+                guard let incoming = after[day] else {
+                    if days[day] == before[day] { days[day] = nil }
+                    continue
+                }
+                if let existing = days[day], existing != before[day], existing.updatedAt > incoming.updatedAt { continue }
+                days[day] = incoming
+            }
+            result.activity = days.values.sorted { $0.day > $1.day }
+        }
+        result.version = max(current.version, proposed.version)
+        return result
+    }
 }
 public enum PersonalError: LocalizedError {
-    case invalidData, invalidActivity, noActivity, invalidFormat
+    case invalidData, invalidActivity, noActivity, invalidFormat, storageConflict
     public var errorDescription: String? {
         switch self {
+        case .storageConflict: "Продукты, профиль или настройки только что изменены в другой копии «Тарелки». Данные обновлены — повторите действие."
         case .invalidData: "Проверьте данные продуктов, профиля и дневной нормы."
         case .invalidActivity: "В файле неверные или противоречивые данные активности. Существующие записи сохранены."
         case .noActivity: "В файле нет дневных итогов активности Apple Watch. Убедитесь, что часы синхронизировались с iPhone, и повторите экспорт."
@@ -198,18 +259,98 @@ public enum PersonalError: LocalizedError {
 public struct PersonalRepository {
     public let url: URL
     public init(directory: URL) { url = directory.appendingPathComponent("personal.json") }
-    public func load() throws -> PersonalData {
-        guard FileManager.default.fileExists(atPath: url.path) else { return PersonalData() }
-        let result = try JSONDecoder().decode(PersonalData.self, from: Data(contentsOf: url))
-        try result.validate(); return result
+    private var lockURL: URL { url.deletingLastPathComponent().appendingPathComponent(".personal.lock") }
+
+    /// A damaged product or activity row never hides the rest. An unreadable or newer file still throws.
+    public func load() throws -> PersonalData { try read().data }
+
+    /// Repairs a partly damaged file after keeping its original bytes beside it. Returns the backup.
+    public func recoverDamaged() throws -> URL? {
+        try PrivateStorage.withExclusiveLock(at: lockURL) {
+            let stored = try read()
+            guard stored.repaired else { return nil }
+            let backup = try keepDamaged(stored.bytes)
+            try write(stored.data)
+            return backup
+        }
     }
-    public func save(_ data: PersonalData) throws {
+
+    /// With a baseline, merges only the changes made since it was loaded; never overwrites
+    /// another copy's edits silently. Returns what was actually stored.
+    @discardableResult
+    public func save(_ data: PersonalData, replacing baseline: PersonalData? = nil) throws -> PersonalData {
         try data.validate()
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                               attributes: [.posixPermissions: 0o700])
+        return try PrivateStorage.withExclusiveLock(at: lockURL) {
+            var result = data
+            if let baseline {
+                let stored = try read()
+                if stored.repaired { _ = try keepDamaged(stored.bytes) }
+                result = try PersonalData.merge(base: baseline, proposed: data, current: stored.data)
+                try result.validate()
+            } else if let stored = try? read(), stored.repaired {
+                _ = try keepDamaged(stored.bytes)
+            }
+            if result.products.contains(where: { $0.unit == .milliliters }) { result.version = 2 }
+            try write(result)
+            return result
+        }
+    }
+
+    private struct Header: Decodable { let version: Int? }
+
+    private func read() throws -> (data: PersonalData, repaired: Bool, bytes: Data) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return (PersonalData(), false, Data()) }
+        let bytes = try Data(contentsOf: url)
+        let header = try JSONDecoder().decode(Header.self, from: bytes)
+        guard (1...2).contains(header.version ?? 1) else { throw FoodError.storageVersion }
+        if let strict = try? JSONDecoder().decode(PersonalData.self, from: bytes), (try? strict.validate()) != nil {
+            return (strict, false, bytes)
+        }
+        var repaired = try JSONDecoder().decode(LenientPersonalData.self, from: bytes).value
+        repaired.discardInvalid()
+        try repaired.validate()
+        return (repaired, true, bytes)
+    }
+
+    private func write(_ data: PersonalData) throws {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        var updated = data
-        if updated.products.contains(where: { $0.unit == .milliliters }) { updated.version = 2 }
-        try encoder.encode(updated).write(to: url, options: .atomic)
+        try PrivateStorage.write(encoder.encode(data), to: url)
+    }
+
+    private func keepDamaged(_ bytes: Data) throws -> URL {
+        let backup = url.deletingLastPathComponent()
+            .appendingPathComponent("personal-damaged-\(Int(Date().timeIntervalSince1970)).json")
+        try PrivateStorage.write(bytes, to: backup)
+        return backup
+    }
+}
+
+/// Decodes whatever is readable, field by field and row by row.
+private struct LenientPersonalData: Decodable {
+    let value: PersonalData
+    private enum Keys: String, CodingKey {
+        case version, products, profile, manualTarget, activity, linkedFileBookmark, linkedFileName
+        case budgetSettings, coachEnabled, dietaryNotes
+    }
+    private struct Lossy<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: Keys.self)
+        var data = PersonalData()
+        data.version = (try? values.decodeIfPresent(Int.self, forKey: .version)) ?? 1
+        data.products = ((try? values.decodeIfPresent([Lossy<SavedProduct>].self, forKey: .products)) ?? [])
+            .compactMap(\.value)
+        data.activity = ((try? values.decodeIfPresent([Lossy<DailyActivity>].self, forKey: .activity)) ?? [])
+            .compactMap(\.value)
+        data.profile = try? values.decodeIfPresent(CalorieProfile.self, forKey: .profile)
+        data.manualTarget = try? values.decodeIfPresent(Double.self, forKey: .manualTarget)
+        data.linkedFileBookmark = try? values.decodeIfPresent(Data.self, forKey: .linkedFileBookmark)
+        data.linkedFileName = try? values.decodeIfPresent(String.self, forKey: .linkedFileName)
+        data.budgetSettings = try? values.decodeIfPresent(BudgetSettings.self, forKey: .budgetSettings)
+        data.coachEnabled = try? values.decodeIfPresent(Bool.self, forKey: .coachEnabled)
+        data.dietaryNotes = try? values.decodeIfPresent(String.self, forKey: .dietaryNotes)
+        value = data
     }
 }

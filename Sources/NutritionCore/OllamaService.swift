@@ -25,7 +25,7 @@ public enum LocalModelError: LocalizedError, Equatable {
 }
 
 /// Never follow a local endpoint's redirect, including a redirect to a paid cloud service.
-final class LocalOnlySessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class NoRedirectSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
@@ -47,7 +47,7 @@ public struct OllamaService: Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
         configuration.timeoutIntervalForResource = 3600
-        return URLSession(configuration: configuration, delegate: LocalOnlySessionDelegate(), delegateQueue: nil)
+        return URLSession(configuration: configuration, delegate: NoRedirectSessionDelegate(), delegateQueue: nil)
     }()
     public init(session: URLSession? = nil) {
         self.session = session ?? Self.localSession

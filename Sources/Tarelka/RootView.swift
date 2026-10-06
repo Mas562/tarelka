@@ -75,12 +75,14 @@ struct RootView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "fork.knife")
-                    .font(.system(size: 21, weight: .medium)).foregroundStyle(Palette.green)
-                    .frame(width: 43, height: 43)
-                    .background(Palette.surface.opacity(0.65), in: RoundedRectangle(cornerRadius: 15))
+                    .font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Palette.accentGradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(.white.opacity(0.25), lineWidth: 0.8))
+                    .shadow(color: Palette.green.opacity(0.28), radius: 8, y: 4)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Тарелка").font(.system(size: 21, weight: .semibold)).tracking(-0.5)
-                    Text("Твой дневник питания").font(.system(size: 10)).foregroundStyle(Palette.secondary)
+                    Text("Тарелка").font(.system(size: 20, weight: .semibold, design: .rounded)).tracking(-0.4)
+                    Text("Дневник питания").font(.system(size: 10, weight: .medium)).tracking(0.2).foregroundStyle(Palette.secondary)
                 }
             }.padding(.horizontal, 7).padding(.bottom, 22)
             VStack(spacing: 5) {
@@ -106,13 +108,13 @@ struct RootView: View {
             todayCard(compact: compact)
             navigation("Настройки", symbol: "slider.horizontal.3", screen: .settings).padding(.top, 14)
             HStack(spacing: 5) {
-                Circle().fill(model.provider == .local || model.hasKey ? Color.teal : Palette.orange).frame(width: 5, height: 5)
+                Circle().fill(model.provider == .local || model.hasKey ? Palette.green : Palette.orange).frame(width: 5, height: 5)
                 Text(model.provider == .local ? "Локально · бесплатно" : "OpenAI · платный API")
                     .font(.system(size: 10)).foregroundStyle(Palette.secondary)
             }.padding(.leading, 12).padding(.top, 15)
         }.padding(.horizontal, 12).padding(.top, 22).padding(.bottom, 20)
             .frame(maxHeight: .infinity)
-            .liquidSurface(radius: 28, tint: .white.opacity(0.12), clear: true)
+            .liquidSurface(radius: 28, tint: Palette.surface.opacity(0.16), clear: true)
     }
     private func navigation(_ title: String, symbol: String, screen: Screen) -> some View {
         let selected = model.screen == screen
@@ -129,8 +131,8 @@ struct RootView: View {
                 .foregroundStyle(selected ? Palette.ink : Palette.secondary)
                 .background {
                     if selected {
-                        RoundedRectangle(cornerRadius: 14).fill(Palette.surface.opacity(0.82))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Palette.edge.opacity(0.95)))
+                        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Palette.surface.opacity(0.9))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.edge, lineWidth: 0.8))
                             .matchedGeometryEffect(id: "selection", in: navigationSpace)
                             .shadow(color: Palette.ink.opacity(0.06), radius: 8, y: 3)
                     }
@@ -158,13 +160,14 @@ struct RootView: View {
                     Text("\(budget.remaining >= 0 ? "Осталось" : "Сверх ориентира") \(Numbers.display(abs(budget.remaining), decimals: 0)) ккал")
                         .font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.green)
                     if budget.creditsActivity && !compact {
-                        Label(budget.awaitingActivity ? "Ждём данные часов" : "+\(Numbers.display(budget.creditedActivity, decimals: 0)) ккал активности", systemImage: "applewatch")
+                        Label(budget.awaitingActivity && budget.creditedActivity == 0 ? "Ждём данные часов"
+                              : "+\(Numbers.display(budget.creditedActivity, decimals: 0)) ккал активности\(budget.awaitingActivity ? " ≈" : "")", systemImage: "applewatch")
                             .font(.system(size: 10)).foregroundStyle(Palette.secondary)
                     }
                 }
             }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.surface.opacity(0.36), in: RoundedRectangle(cornerRadius: 19))
-                .overlay(RoundedRectangle(cornerRadius: 19).stroke(Palette.edge.opacity(0.55)))
+                .background(Palette.surface.opacity(0.42), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.edge.opacity(0.6), lineWidth: 0.8))
         }
     }
     private func miniMacro(_ title: String, _ value: Double) -> some View {
@@ -186,6 +189,6 @@ struct RootView: View {
             }
         }.padding(13).foregroundStyle(isError ? Palette.orange : Palette.green)
             .background(isError ? Palette.errorBanner : Palette.successBanner)
-            .clipShape(RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 32).padding(.bottom, 8)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)).padding(.horizontal, 32).padding(.bottom, 8)
     }
 }

@@ -77,6 +77,41 @@ struct NutritionTests {
         repository.removePhoto(name)
         #expect(!(FileManager.default.fileExists(atPath: try #require(repository.photoURL(name)).path)))
     }
+    @Test func duplicateIdentifiersCannotMakeJournalUnreadable() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = MealRepository(directory: directory)
+        let meal = Meal(date: Date(), kind: .lunch, name: "Обед", weight: 100, ingredients: [food()])
+        try repository.save([meal])
+        let original = try Data(contentsOf: repository.journalURL)
+        #expect(throws: FoodError.self) { try repository.save([meal, meal]) }
+        #expect(try Data(contentsOf: repository.journalURL) == original)
+        var duplicatedIngredient = food(50)
+        let first = duplicatedIngredient
+        duplicatedIngredient.grams = 50
+        let invalid = Meal(date: Date(), kind: .lunch, name: "Обед", weight: 100,
+                           ingredients: [first, duplicatedIngredient])
+        #expect(throws: FoodError.self) { try repository.save([invalid]) }
+        #expect(try Data(contentsOf: repository.journalURL) == original)
+    }
+    @Test func privateStorageTightensExistingPermissions() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = FileManager.default
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o755])
+        let oldFile = directory.appendingPathComponent("meals.json")
+        try Data("old".utf8).write(to: oldFile)
+        try manager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: oldFile.path)
+        try PrivateStorage.secureExisting(in: directory)
+        let directoryMode = try #require(manager.attributesOfItem(atPath: directory.path)[.posixPermissions] as? NSNumber).intValue
+        let fileMode = try #require(manager.attributesOfItem(atPath: oldFile.path)[.posixPermissions] as? NSNumber).intValue
+        #expect(directoryMode & 0o777 == 0o700)
+        #expect(fileMode & 0o777 == 0o600)
+        try MealRepository(directory: directory).save([])
+        let updatedMode = try #require(manager.attributesOfItem(atPath: oldFile.path)[.posixPermissions] as? NSNumber).intValue
+        #expect(updatedMode & 0o777 == 0o600)
+    }
     @Test func testRequestUsesResponsesImageAndStrictSchema() throws {
         let request = try OpenAIService.makeRequest(jpeg: Data([1, 2, 3]), weight: 350,
                                                     notes: "Курица с рисом", key: "test-key", model: "test-model")

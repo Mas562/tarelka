@@ -3,17 +3,23 @@ import NutritionCore
 
 struct CatalogSettingsView: View {
     @AppStorage("useFoodCatalog") private var useCatalog = true
+    @State private var foodCount: Int?
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
                 Label("КБЖУ из справочника", systemImage: "books.vertical").font(.system(size: 18, weight: .semibold))
-                Toggle("После фото брать КБЖУ из базы продуктов", isOn: $useCatalog)
-                Text("\(FoodCatalog.shared.foods.count) продуктов USDA, бесплатно и без интернета. Фото определяет состав и доли, а ты подтверждаешь подходящий продукт и способ приготовления. При отсутствии совпадения поля КБЖУ останутся пустыми: можно выбрать свои данные с упаковки или ввести их вручную.")
+                Toggle("После фото сверять КБЖУ с базой продуктов", isOn: $useCatalog)
+                Text("\(foodCount.map { "\($0) продуктов USDA" } ?? "База продуктов USDA"), бесплатно и без интернета. Фото определяет состав и доли. Если продукт однозначно совпал с «Моими продуктами» или базой, КБЖУ берутся оттуда. Иначе остаётся оценка нейросети с кнопкой «Сверить с базой» — подтверди продукт и способ приготовления.")
                     .font(.system(size: 12)).foregroundStyle(Palette.secondary)
                 Text("Значения справочника — средние на 100 г съедобной части. Сырой вес, готовый вес, масло и панировка дают разные результаты. Для конкретной марки точнее данные с её упаковки.")
                     .font(.system(size: 11)).foregroundStyle(Palette.secondary)
-                Link("Источник: USDA FoodData Central · SR Legacy 2018", destination: URL(string: "https://fdc.nal.usda.gov/download-datasets/")!).font(.system(size: 11))
+                Link("Источник: USDA FoodData Central · SR Legacy 2018", destination: URL(string: "https://fdc.nal.usda.gov/download-datasets/")!).foregroundStyle(Palette.green).font(.system(size: 11))
             }
+        }
+        .task {
+            let count = await Task.detached(priority: .utility) { FoodCatalog.shared.foods.count }.value
+            guard !Task.isCancelled else { return }
+            foodCount = count
         }
     }
 }
@@ -24,7 +30,8 @@ struct CatalogPicker: View {
     @State private var results: [CatalogFood] = []
     @State private var selected: CatalogFood?
     @State private var grams: String
-    @State private var searching = false
+    @State private var searching = true
+    @State private var foodCount: Int?
     let actionTitle: String
     let requiresWeight: Bool
     let onChoose: (CatalogFood, Double) -> Void
@@ -38,7 +45,7 @@ struct CatalogPicker: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Справочник продуктов").font(.system(size: 24, weight: .semibold))
-                    Text("\(FoodCatalog.shared.foods.count) записей · КБЖУ на 100 г · работает без интернета").font(.system(size: 11)).foregroundStyle(Palette.secondary)
+                    Text("\(foodCount.map { "\($0) записей" } ?? "Загружаем справочник…") · КБЖУ на 100 г · работает без интернета").font(.system(size: 11)).foregroundStyle(Palette.secondary)
                 }
                 Spacer()
                 Button("Закрыть") { dismiss() }.buttonStyle(SoftButton()).keyboardShortcut(.cancelAction)
@@ -68,7 +75,7 @@ struct CatalogPicker: View {
                 }
             }.frame(minHeight: 180, maxHeight: .infinity)
             if let selected {
-                Link("USDA · запись \(selected.id) ↗", destination: selected.sourceURL).font(.system(size: 11))
+                Link("USDA · запись \(selected.id) ↗", destination: selected.sourceURL).foregroundStyle(Palette.green).font(.system(size: 11))
                 if requiresWeight {
                     labeledField("Вес съедобной части, г", text: $grams)
                     if let weight { Text("В порции: \(Numbers.display(selected.per100.scaled(by: weight / 100).calories)) ккал").foregroundStyle(Palette.green) }
@@ -81,9 +88,12 @@ struct CatalogPicker: View {
                 selected = nil; searching = true
                 do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
                 let search = query
-                let found = await Task.detached(priority: .userInitiated) { FoodCatalog.shared.search(search) }.value
+                let found = await Task.detached(priority: .userInitiated) {
+                    let catalog = FoodCatalog.shared
+                    return (catalog.foods.count, catalog.search(search))
+                }.value
                 guard !Task.isCancelled else { return }
-                results = found; searching = false
+                foodCount = found.0; results = found.1; searching = false
             }
     }
 }

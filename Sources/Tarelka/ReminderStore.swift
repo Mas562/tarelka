@@ -49,9 +49,8 @@ final class ReminderStore: NSObject, ObservableObject, UNUserNotificationCenterD
             }
             // Validate and encode before replacing the app's own notifications.
             let bytes = try JSONEncoder().encode(plan)
-            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try await schedule(plan)
-            do { try bytes.write(to: file, options: .atomic) }
+            do { try PrivateStorage.write(bytes, to: file) }
             catch { try? await schedule(saved); throw error }
             saved = plan
             message = plan.enabled ? "Расписание сохранено. macOS будет напоминать каждый день." : "Напоминания выключены."

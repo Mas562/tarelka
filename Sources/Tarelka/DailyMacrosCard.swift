@@ -14,12 +14,12 @@ struct DailyMacrosCard: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Баланс БЖУ").font(.system(size: 21, weight: .semibold)).tracking(-0.5)
                     Spacer()
-                    Text("ОСТАТОК НА ДЕНЬ").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundStyle(Palette.secondary)
+                    Eyebrow(text: "Остаток на день")
                 }
                 HStack(alignment: .top, spacing: 18) {
-                    column("Белки", eaten: eaten.protein, target: budget?.macroTargets?.protein, color: Color(red: 0.06, green: 0.49, blue: 0.46))
+                    column("Белки", eaten: eaten.protein, target: budget?.macroTargets?.protein, color: Palette.green)
                     column("Жиры", eaten: eaten.fat, target: budget?.macroTargets?.fat, color: Palette.orange)
-                    column("Углеводы", eaten: eaten.carbs, target: budget?.macroTargets?.carbs, color: Palette.violet)
+                    column("Углеводы", eaten: eaten.carbs, target: budget?.macroTargets?.carbs, color: Palette.blue)
                 }
                 if budget?.macroTargets == nil {
                     Button("Рассчитать ориентиры по моим параметрам", action: editProfile).buttonStyle(SoftButton())
@@ -37,7 +37,7 @@ struct DailyMacrosCard: View {
                             Text("По записям выбранного дня")
                                 .font(.system(size: 10)).foregroundStyle(Palette.secondary)
                         }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Palette.mint.opacity(0.3)).clipShape(RoundedRectangle(cornerRadius: 14))
+                            .background(Palette.mint.opacity(0.45), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                 }
             }
@@ -105,7 +105,7 @@ struct MacroMethodDetails: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Рост, вес, возраст и пол учитываются через норму калорий. Для БЖУ приложение распределяет энергию дня: 20% на белки, 30% на жиры и 50% на углеводы. В 1 г белков и углеводов — 4 ккал, жиров — 9 ккал.")
                 Text("Используется дневной ориентир с учётом выбранной цели и активности. Если база введена вручную, расчёт идёт от неё. Это ориентиры для планирования, а не жёсткие пределы: добирать каждый грамм не обязательно.")
-                Link("Рекомендуемые диапазоны для взрослых · National Academies", destination: URL(string: "https://www.nationalacademies.org/read/10925/chapter/25")!)
+                Link("Рекомендуемые диапазоны для взрослых · National Academies", destination: URL(string: "https://www.nationalacademies.org/read/10925/chapter/25")!).foregroundStyle(Palette.green)
             }.font(.system(size: 11)).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
         }.font(.system(size: 11)).foregroundStyle(Palette.secondary)
     }
