@@ -43,12 +43,12 @@ struct MenuBarDashboard: View {
                 }
 
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(budget == nil ? "СЪЕДЕНО СЕГОДНЯ" : "ОСТАЛОСЬ НА СЕГОДНЯ")
+                    Text(budget == nil ? "СЪЕДЕНО СЕГОДНЯ" : budget!.remaining < 0 ? "СВЕРХ ОРИЕНТИРА" : "ОСТАЛОСЬ НА СЕГОДНЯ")
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1.25)
                         .foregroundStyle(muted)
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Text(Numbers.display(budget?.remaining ?? eaten.calories, decimals: 0))
+                        Text(Numbers.display(budget.map { abs($0.remaining) } ?? eaten.calories, decimals: 0))
                             .font(.system(size: 37, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(ink)
@@ -139,6 +139,23 @@ struct MenuBarDashboard: View {
                     }
                 }
 
+                if let error = model.repeatError {
+                    Label(error, systemImage: "exclamationmark.circle")
+                        .font(.system(size: 11)).foregroundStyle(Color(red: 1, green: 0.72, blue: 0.6))
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let repeated = model.lastRepeated {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(mint)
+                        Text("Добавлено: \(repeated.name)").foregroundStyle(ink).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Button("Отменить") { model.undoRepeat() }
+                            .buttonStyle(.plain).foregroundStyle(mint)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 10).frame(height: 32)
+                    .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                }
+
                 Button { show(.diary) } label: {
                     HStack {
                         Text("Открыть дневник")
@@ -158,6 +175,12 @@ struct MenuBarDashboard: View {
                                startPoint: .topLeading, endPoint: .bottomTrailing)
             }
             .environment(\.colorScheme, .dark)
+        }
+        // A fresh repeat or error is shown for a while, then the panel returns to its usual look.
+        .task(id: model.lastRepeated?.id.uuidString ?? model.repeatError) {
+            guard model.lastRepeated != nil || model.repeatError != nil else { return }
+            do { try await Task.sleep(for: .seconds(8)) } catch { return }
+            model.dismissRepeatStatus()
         }
     }
 

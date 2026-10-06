@@ -9,7 +9,10 @@ struct NutritionTests {
     @Test func testRussianInputAndMalformedValues() {
         #expect((Numbers.parse(" 350,5 ")) == (350.5))
         #expect((Numbers.parse("350.5")) == (350.5))
-        for value in ["", "-1", "NaN", "inf", "3,5.2", "350 г", "1e9", "1 000"] {
+        // Russian thousands grouping is accepted; arbitrary spaces are not.
+        #expect(Numbers.parse("1 000") == 1000)
+        #expect(Numbers.parse("1\u{00A0}250,5") == 1250.5)
+        for value in ["", "-1", "NaN", "inf", "3,5.2", "350 г", "1e9", "1 00", "12 3456", "1  000"] {
             #expect((Numbers.parse(value)) == nil)
         }
         #expect(!(Numbers.validWeight(0)))

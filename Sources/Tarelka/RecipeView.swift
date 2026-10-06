@@ -18,12 +18,18 @@ final class RecipeStore: ObservableObject {
     @Published private(set) var usedDietaryNotes = ""
     private var task: Task<Void, Never>?
     private var token = UUID()
-    func recognize(_ jpeg: Data) {
+    func report(_ failure: Error) { error = failure.localizedDescription }
+    /// With an OpenAI key the photo goes to OpenAI, as chosen in Settings; otherwise to the local model.
+    func recognize(_ jpeg: Data, key: String? = nil, model: String = OpenAIService.defaultModel) {
         cancel(); busy = true; status = "Рассматриваю продукты…"; error = nil
         let id = token
         task = Task {
             do {
-                let inventory = try await OllamaService().pantry(jpeg: jpeg)
+                let inventory = if let key {
+                    try await OpenAIService().pantry(jpeg: jpeg, key: key, model: model)
+                } else {
+                    try await OllamaService().pantry(jpeg: jpeg)
+                }
                 guard id == token, !Task.isCancelled else { return }
                 uncertainties = inventory.uncertainties
                 if inventory.items.isEmpty { error = "Не получилось увидеть продукты. Попробуй другой снимок или перечисли их текстом." }
@@ -84,7 +90,13 @@ struct RecipeView: View {
                                 Button(photo.preview == nil ? "Добавить фото продуктов" : "Заменить фото") { choosePhoto() }.buttonStyle(SoftButton()).disabled(store.busy || photo.busy || speech.recording)
                                 if let data = photo.data {
                                     HStack {
-                                        Button("Распознать продукты") { model.coach.cancel(); store.recognize(data) }.buttonStyle(.link).disabled(store.busy || speech.recording)
+                                        Button("Распознать продукты") {
+                                            do {
+                                                let key = try model.recognitionKey()
+                                                if key == nil { model.coach.cancel() }
+                                                store.recognize(data, key: key, model: model.modelName)
+                                            } catch { store.report(error) }
+                                        }.buttonStyle(.link).disabled(store.busy || speech.recording)
                                         Button("Убрать фото") { photo.remove() }.buttonStyle(.link).disabled(store.busy)
                                     }
                                 }
@@ -154,7 +166,8 @@ struct RecipeView: View {
             })
         }
         .onChange(of: speech.transcript) { _, _ in saveDictation() }
-        .onDisappear { speech.stop(); photo.cancel(); store.cancel(); panel?.cancel(nil); panel = nil }
+        // Recipe generation lives in the store and keeps running after leaving this screen.
+        .onDisappear { speech.stop(); photo.cancel(); panel?.cancel(nil); panel = nil }
     }
     private func saveDictation() {
         guard !speech.transcript.isEmpty else { return }

@@ -45,11 +45,9 @@ struct RootView: View {
                 if model.notice == notice { model.notice = nil }
             }
             .sheet(item: $model.drinkEditor) { draft in DrinkEditor(draft: draft) }
-            .onChange(of: model.screen) { _, screen in
-                if screen != .coach && screen != .day { model.coach.cancel() }
-            }
-            .onChange(of: model.isAnalyzing) { _, active in if active { model.coach.cancel() } }
-            .onChange(of: model.drinkEditor?.id) { _, id in if id != nil { model.coach.cancel() } }
+            // Long local answers keep running while the user looks at other screens; the sidebar shows them.
+            // Only one local model runs at a time; OpenAI requests do not compete with the coach.
+            .onChange(of: model.isAnalyzing) { _, active in if active && model.provider == .local { model.coach.cancel() } }
             .task {
                 while !Task.isCancelled {
                     personal.refreshLinkedFile()
@@ -57,12 +55,10 @@ struct RootView: View {
                 }
             }
             .onOpenURL { url in
+                // Any website can open a tarelka:// link, so a link only brings the app forward on «Мой день»
+                // (the widget's link). It never opens an editor or changes the diary.
                 guard url.scheme == "tarelka" else { return }
-                switch url.host {
-                case "diary": model.selectedDay = Date(); model.screen = .diary
-                case "drink": model.drinkEditor = DrinkDraft()
-                default: model.screen = .day
-                }
+                model.screen = .day
                 NSApp.activate(ignoringOtherApps: true)
             }
     }
@@ -90,8 +86,8 @@ struct RootView: View {
                 navigation("Дневник питания", symbol: "square.grid.2x2", screen: .diary)
                 navigation("Отчёт за неделю", symbol: "chart.bar.xaxis", screen: .week)
                 navigation("Мои продукты", symbol: "shippingbox", screen: .products)
-                navigation("Помощник", symbol: "sparkles", screen: .coach)
-                navigation("Что приготовить", symbol: "carrot", screen: .recipes)
+                navigation("Помощник", symbol: "sparkles", screen: .coach) { CoachIndicator(store: model.coach) }
+                navigation("Что приготовить", symbol: "carrot", screen: .recipes) { RecipeIndicator(store: model.recipes) }
             }
             Rectangle().fill(Palette.ink.opacity(0.08)).frame(height: 1).padding(.horizontal, 10).padding(.vertical, 12)
             VStack(spacing: 5) {
@@ -117,6 +113,10 @@ struct RootView: View {
             .liquidSurface(radius: 28, tint: Palette.surface.opacity(0.16), clear: true)
     }
     private func navigation(_ title: String, symbol: String, screen: Screen) -> some View {
+        navigation(title, symbol: symbol, screen: screen) { EmptyView() }
+    }
+    private func navigation<Accessory: View>(_ title: String, symbol: String, screen: Screen,
+                                             @ViewBuilder accessory: () -> Accessory) -> some View {
         let selected = model.screen == screen
         return Button {
             withAnimation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.82)) { model.screen = screen }
@@ -126,6 +126,7 @@ struct RootView: View {
                     .foregroundStyle(selected ? Palette.green : Palette.secondary)
                 Text(title).font(.system(size: 12, weight: selected ? .semibold : .medium))
                 Spacer(minLength: 0)
+                accessory()
                 if selected { Circle().fill(Palette.green).frame(width: 4, height: 4) }
             }.padding(.horizontal, 12).padding(.vertical, 11)
                 .foregroundStyle(selected ? Palette.ink : Palette.secondary)
@@ -191,4 +192,20 @@ struct RootView: View {
             .background(isError ? Palette.errorBanner : Palette.successBanner)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)).padding(.horizontal, 32).padding(.bottom, 8)
     }
+}
+
+/// Shows that a recipe or coach answer is still being prepared after the user left its screen.
+private struct WorkIndicator: View {
+    let busy: Bool
+    var body: some View {
+        if busy { ProgressView().controlSize(.mini).help("Ответ готовится. Можно пользоваться другими разделами.") }
+    }
+}
+private struct CoachIndicator: View {
+    @ObservedObject var store: CoachStore
+    var body: some View { WorkIndicator(busy: store.loading) }
+}
+private struct RecipeIndicator: View {
+    @ObservedObject var store: RecipeStore
+    var body: some View { WorkIndicator(busy: store.busy) }
 }

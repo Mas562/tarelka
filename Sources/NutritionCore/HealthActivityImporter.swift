@@ -1,26 +1,39 @@
 import Foundation
 
+public struct HealthActivityImport: Sendable {
+    public let entries: [DailyActivity]
+    /// Daily rows that were malformed or contradictory and were left out instead of failing the whole file.
+    public let skipped: Int
+}
+
 public enum HealthActivityImporter {
-    public static func read(url: URL) throws -> [DailyActivity] {
+    public static func read(url: URL) throws -> [DailyActivity] { try readReport(url: url).entries }
+    public static func readReport(url: URL) throws -> HealthActivityImport {
         if url.pathExtension.lowercased() == "xml" {
-            guard let parser = XMLParser(contentsOf: url) else { throw PersonalError.invalidFormat }
-            return try parseXML(parser)
+            // Health exports can be several gigabytes; stream the file instead of loading it into memory.
+            guard let stream = InputStream(url: url) else { throw PersonalError.invalidFormat }
+            return try parseXML(XMLParser(stream: stream))
         }
         guard url.pathExtension.lowercased() == "json",
               (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max) <= 5_000_000 else { throw PersonalError.invalidFormat }
-        return try readJSON(Data(contentsOf: url))
+        return HealthActivityImport(entries: try readJSON(Data(contentsOf: url)), skipped: 0)
     }
-    public static func readXML(_ data: Data) throws -> [DailyActivity] { try parseXML(XMLParser(data: data)) }
-    private static func parseXML(_ parser: XMLParser) throws -> [DailyActivity] {
+    public static func readXML(_ data: Data) throws -> [DailyActivity] { try readXMLReport(data).entries }
+    public static func readXMLReport(_ data: Data) throws -> HealthActivityImport { try parseXML(XMLParser(data: data)) }
+    private static func parseXML(_ parser: XMLParser) throws -> HealthActivityImport {
         let delegate = HealthXMLDelegate()
         parser.delegate = delegate
         parser.shouldResolveExternalEntities = false
         guard parser.parse(), !delegate.invalid, delegate.isHealthData, let exportDate = delegate.exportDate else {
             throw PersonalError.invalidActivity
         }
-        guard !delegate.totals.isEmpty else { throw PersonalError.noActivity }
-        return delegate.totals.map { DailyActivity(day: $0.key, activeCalories: $0.value, updatedAt: exportDate, source: .appleHealth) }
+        let valid = delegate.totals.filter { !delegate.conflicting.contains($0.key) }
+        guard !valid.isEmpty else {
+            throw delegate.skipped > 0 || !delegate.conflicting.isEmpty ? PersonalError.invalidActivity : PersonalError.noActivity
+        }
+        let entries = valid.map { DailyActivity(day: $0.key, activeCalories: $0.value, updatedAt: exportDate, source: .appleHealth) }
             .sorted { $0.day > $1.day }
+        return HealthActivityImport(entries: entries, skipped: delegate.skipped + delegate.conflicting.count)
     }
     /// A transfer file contains daily totals, never additive samples. Reimport replaces a day.
     public static func readJSON(_ data: Data) throws -> [DailyActivity] {
@@ -39,10 +52,20 @@ public enum HealthActivityImporter {
         guard Set(results.map(\.day)).count == results.count else { throw PersonalError.invalidActivity }
         return results.sorted { $0.day > $1.day }
     }
+    /// Health writes "Cal" (a food calorie, equal to 1 kcal) in some locales.
+    static func kilocalories(_ amount: Double, unit: String) -> Double? {
+        switch unit {
+        case "kcal", "Cal": return amount
+        case "kJ": return amount / 4.184
+        default: return nil
+        }
+    }
 }
 
 private final class HealthXMLDelegate: NSObject, XMLParserDelegate {
     var totals: [String: Double] = [:]
+    var conflicting: Set<String> = []
+    var skipped = 0
     var exportDate: Date?
     var invalid = false
     var isHealthData = false
@@ -59,12 +82,12 @@ private final class HealthXMLDelegate: NSObject, XMLParserDelegate {
         }
         // Records and Workouts overlap. Apple's activity summary is the single daily Move total.
         guard elementName == "ActivitySummary" else { return }
+        // One bad or contradictory day is left out; it must not discard every other day of the export.
         guard let day = attributes["dateComponents"], DayKey.isValid(day),
               let raw = attributes["activeEnergyBurned"], let amount = Double(raw), amount.isFinite, amount >= 0,
-              let unit = attributes["activeEnergyBurnedUnit"], ["kcal", "kJ"].contains(unit) else { fail(parser); return }
-        let calories = unit == "kJ" ? amount / 4.184 : amount
-        guard calories <= 30_000 else { fail(parser); return }
-        if let previous = totals[day], abs(previous - calories) > 0.001 { fail(parser); return }
+              let unit = attributes["activeEnergyBurnedUnit"],
+              let calories = HealthActivityImporter.kilocalories(amount, unit: unit), calories <= 30_000 else { skipped += 1; return }
+        if let previous = totals[day], abs(previous - calories) > 0.001 { conflicting.insert(day); return }
         totals[day] = calories
     }
     func parser(_ parser: XMLParser, didEndElement: String, namespaceURI: String?, qualifiedName: String?) { depth -= 1 }

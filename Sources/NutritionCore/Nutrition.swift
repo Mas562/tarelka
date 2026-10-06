@@ -26,9 +26,13 @@ public enum FoodError: LocalizedError {
 
 public enum Numbers {
     /// Explicitly accepts either Russian decimal commas or decimal points; never parses a prefix.
+    /// Thousands may be grouped with a space, as Russian formatting does: "1 000" or "1 000,5".
     public static func parse(_ string: String) -> Double? {
-        let clean = string.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
+        var clean = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.range(of: #"^\d{1,3}(?:[ \x{00A0}\x{202F}]\d{3})+(?:[.,]\d*)?$"#, options: .regularExpression) != nil {
+            clean.removeAll { $0 == " " || $0 == "\u{00A0}" || $0 == "\u{202F}" }
+        }
+        clean = clean.replacingOccurrences(of: ",", with: ".")
         guard clean.range(of: #"^\d+(?:\.\d*)?$"#, options: .regularExpression) != nil,
               let value = Double(clean), value.isFinite else { return nil }
         return value
@@ -146,7 +150,7 @@ public enum NutritionMath {
 public enum MealKind: String, Codable, CaseIterable, Sendable {
     case breakfast = "Завтрак", lunch = "Обед", dinner = "Ужин", snack = "Перекус"
     public var symbol: String {
-        switch self { case .breakfast: return "sunrise"; case .lunch: return "sun.max"; case .dinner: return "moon"; case .snack: return "apple.logo" }
+        switch self { case .breakfast: return "sunrise"; case .lunch: return "sun.max"; case .dinner: return "moon"; case .snack: return "carrot" }
     }
     public static func suggested(at date: Date = Date()) -> MealKind {
         switch Calendar.current.component(.hour, from: date) {
@@ -179,6 +183,11 @@ public struct Meal: Identifiable, Codable, Equatable, Sendable {
         self.id = id; self.date = date; self.kind = kind; self.name = name; self.weight = weight
         self.ingredients = ingredients; self.notes = notes; self.assumptions = assumptions
         self.isEstimate = isEstimate; self.photoFilename = photoFilename
+    }
+    /// Entries may be dated any time today or earlier, never on a future day.
+    public static func allowsDate(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) else { return true }
+        return date < tomorrow
     }
     public func validate() throws {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw FoodError.invalidIngredient }

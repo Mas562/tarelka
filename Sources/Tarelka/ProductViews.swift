@@ -27,7 +27,7 @@ struct ProductsView: View {
                 }
                 Text("Сохраните калории и БЖУ на 100 г или 100 мл один раз. Затем указывайте только вес или объём.")
                     .font(.system(size: 13)).foregroundStyle(Palette.secondary)
-                Button { showCatalog = true } label: { Label("Открыть справочник · 7 793 продукта", systemImage: "books.vertical") }.buttonStyle(SoftButton())
+                Button { showCatalog = true } label: { Label("Открыть справочник продуктов USDA", systemImage: "books.vertical") }.buttonStyle(SoftButton())
                 TextField("Найти продукт", text: $search).inputSurface().accessibilityLabel("Найти продукт")
                 if products.isEmpty {
                     Card {

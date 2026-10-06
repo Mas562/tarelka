@@ -11,10 +11,16 @@ final class PersonalStore: ObservableObject {
     @Published private(set) var storageError: String?
     @Published private(set) var importing = false
     private let repository: PersonalRepository
-    private var lastFileModification: Date?
+    /// Remembered across launches so a multi-gigabyte Health export is not parsed again unless it changed.
+    private var lastFileModification: Date? {
+        didSet { UserDefaults.standard.set(lastFileModification, forKey: modificationKey) }
+    }
+    private let modificationKey: String
     private var filePanel: NSOpenPanel?
     init(directory: URL) {
         repository = PersonalRepository(directory: directory)
+        modificationKey = "linkedActivityModification." + directory.standardizedFileURL.path
+        lastFileModification = UserDefaults.standard.object(forKey: modificationKey) as? Date
         do {
             let backup = try? repository.recoverDamaged()
             data = try repository.load()
@@ -94,7 +100,8 @@ final class PersonalStore: ObservableObject {
             defer { if scoped { url.stopAccessingSecurityScopedResource() }; importing = false }
             do {
                 let modification = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-                let entries = try await Task.detached(priority: .utility) { try HealthActivityImporter.read(url: url) }.value
+                let report = try await Task.detached(priority: .utility) { try HealthActivityImporter.readReport(url: url) }.value
+                let entries = report.entries
                 var updated = data
                 try updated.mergeActivity(entries)
                 if link {
@@ -103,7 +110,8 @@ final class PersonalStore: ObservableObject {
                 }
                 if commit(updated) {
                     if link || silent { lastFileModification = modification }
-                    if !silent { status = "Данные активности обработаны: \(entries.count) дн. Повторные даты обновляются, а не складываются." }
+                    let skipped = report.skipped > 0 ? " Пропущено дней с неверными или противоречивыми данными: \(report.skipped)." : ""
+                    if !silent { status = "Данные активности обработаны: \(entries.count) дн. Повторные даты обновляются, а не складываются.\(skipped)" }
                 }
             } catch { self.error = "Не удалось прочитать активность: \(error.localizedDescription)" }
         }

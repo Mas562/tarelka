@@ -124,31 +124,36 @@ public struct MealRepository {
 /// Restrict an existing directory before an atomic write creates its temporary file.
 public enum PrivateStorage {
     /// A separate inode keeps the lock valid across atomic journal replacements.
-    /// Do not block the main thread when another process is saving.
-    public static func withExclusiveLock<T>(at url: URL, _ work: () throws -> T) throws -> T {
+    /// Another copy's save takes milliseconds, so wait briefly instead of reporting a conflict at once,
+    /// but never block the main thread for long.
+    public static func withExclusiveLock<T>(at url: URL, wait: TimeInterval = 1.5, _ work: () throws -> T) throws -> T {
         try prepareDirectory(url.deletingLastPathComponent())
         let descriptor = open(url.path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
         defer { close(descriptor) }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            if errno == EWOULDBLOCK { throw FoodError.storageConflict }
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        let deadline = Date().addingTimeInterval(wait)
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EINTR else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+            guard Date() < deadline else { throw FoodError.storageConflict }
+            usleep(50_000)
         }
         defer { flock(descriptor, LOCK_UN) }
         return try work()
     }
 
+    /// Some volumes (exFAT, network shares) do not support POSIX permissions. Restricting access is
+    /// best effort there; it must not make a readable diary read-only or fail a completed write.
     public static func prepareDirectory(_ directory: URL) throws {
         let manager = FileManager.default
         try manager.createDirectory(at: directory, withIntermediateDirectories: true,
                                     attributes: [.posixPermissions: 0o700])
-        try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        try? manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     }
 
     public static func write(_ data: Data, to url: URL) throws {
         try prepareDirectory(url.deletingLastPathComponent())
         try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     /// Tighten permissions on files created by older versions, without changing their contents.

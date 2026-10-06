@@ -37,7 +37,6 @@ struct PreferencesView: View {
                 }.pickerStyle(.segmented).disabled(model.isAnalyzing || model.localSetup.isDownloading)
                 if model.provider == .local {
                     LocalSettingsView(setup: model.localSetup)
-                    LocalSettingsView(setup: model.coachSetup)
                 } else {
                 Card {
                     VStack(alignment: .leading, spacing: 19) {
@@ -52,7 +51,7 @@ struct PreferencesView: View {
                             Spacer()
                             if model.hasKey { Image(systemName: "checkmark.seal.fill").foregroundStyle(Palette.green) }
                         }
-                        Text("Фото, вес и уточнения отправляются в OpenAI только по кнопке «Рассчитать по фото». Запросы оплачиваются по тарифам API OpenAI.")
+                        Text("Фото блюда, напитка или продуктов для рецепта и ваши уточнения отправляются в OpenAI только по кнопке распознавания. Запросы оплачиваются по тарифам API OpenAI. Рецепты и помощник по-прежнему работают бесплатно на Mac.")
                             .font(.system(size: 12)).foregroundStyle(Palette.secondary).lineSpacing(4)
                         VStack(alignment: .leading, spacing: 9) {
                             FieldLabel(title: model.hasKey ? "Новый ключ API (если хотите заменить)" : "Ключ API")
@@ -88,6 +87,8 @@ struct PreferencesView: View {
                     }
                 }
                 }
+                // Recipes and the coach always run on this Mac, whichever photo provider is chosen.
+                LocalSettingsView(setup: model.coachSetup)
                 Card {
                     VStack(alignment: .leading, spacing: 14) {
                         Label("Ваш дневник остаётся на Mac", systemImage: "internaldrive").font(.system(size: 15, weight: .medium))

@@ -90,7 +90,7 @@ struct LabelScannerView: View {
                             labeledField("Жиры, г", text: $fat)
                         }
                         labeledField("Углеводы, г", text: $carbs)
-                        Toggle("Я сверил(а) значения: они указаны на \(unit.basis)", isOn: $confirmed)
+                        Toggle("Значения сверены с упаковкой: они указаны на \(unit.basis)", isOn: $confirmed)
                             .font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
                         if scan != nil, nutrients == nil, !busy {
                             Text("Нужны четыре корректных числа. Если на упаковке указан ноль, впишите 0.")

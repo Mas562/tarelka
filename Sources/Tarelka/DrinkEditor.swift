@@ -216,7 +216,7 @@ struct DrinkEditor: View {
             if photo.data != nil {
                 TextField("Добавки: молоко, сахар, сироп…", text: $additions).inputSurface()
                     .accessibilityLabel("Добавки к напитку")
-                Button("Оценить напиток по фото · бесплатно") { analyzePhoto() }
+                Button(model.provider == .local ? "Оценить напиток по фото · бесплатно" : "Оценить напиток по фото · OpenAI") { analyzePhoto() }
                     .buttonStyle(.bordered).disabled(photo.busy || Numbers.parse(draft.volume).map(Numbers.validWeight) != true)
                 Text("По внешнему виду нельзя точно узнать количество сахара и добавок. Проверь оценку перед сохранением.")
                     .font(.system(size: 11)).foregroundStyle(Palette.secondary)
@@ -251,12 +251,19 @@ struct DrinkEditor: View {
     }
     private func analyzePhoto() {
         guard let data = photo.data, let volume = Numbers.parse(draft.volume), Numbers.validWeight(volume) else { return }
-        cancelAnalysis(); model.coach.cancel(); analyzing = true; error = nil
+        let key: String?
+        do { key = try model.recognitionKey() } catch { self.error = error.localizedDescription; return }
+        cancelAnalysis(); if key == nil { model.coach.cancel() }; analyzing = true; error = nil
         let token = analysisToken
         let notes = draft.name + ". " + additions
+        let modelName = model.modelName
         analysisTask = Task {
             do {
-                let result = try await OllamaService().analyzeDrink(jpeg: data, volume: volume, notes: notes)
+                let result = if let key {
+                    try await OpenAIService().analyzeDrink(jpeg: data, volume: volume, notes: notes, key: key, model: modelName)
+                } else {
+                    try await OllamaService().analyzeDrink(jpeg: data, volume: volume, notes: notes)
+                }
                 try Task.checkCancellation()
                 guard token == analysisToken else { return }
                 draft.name = result.name; apply(result.per100ml)

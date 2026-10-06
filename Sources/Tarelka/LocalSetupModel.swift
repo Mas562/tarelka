@@ -13,6 +13,7 @@ final class LocalSetupModel: ObservableObject {
     @Published var status = "Проверим, готов ли Mac к распознаванию."
     private var task: Task<Void, Never>?
     private var operationID = UUID()
+    private var tracker = OllamaService.DownloadTracker()
 
     func check() {
         guard !isChecking, !isDownloading else { return }
@@ -33,7 +34,7 @@ final class LocalSetupModel: ObservableObject {
     }
     func download() {
         guard !isDownloading, !isChecking else { return }
-        isDownloading = true; isReady = false; progress = nil
+        isDownloading = true; isReady = false; progress = nil; tracker = OllamaService.DownloadTracker()
         status = "Подключаемся к Ollama. Для загрузки нужен интернет…"
         let token = UUID(); operationID = token
         task = Task { [self] in
@@ -54,7 +55,7 @@ final class LocalSetupModel: ObservableObject {
     }
     private func update(_ event: OllamaService.DownloadProgress, token: UUID) {
         guard token == operationID else { return }
-        progress = event.fraction
+        progress = tracker.update(event)
         if let fraction = progress { status = "Загружается файл модели: \(Int(fraction * 100))%" }
         else { status = "Подготавливаем модель. Первое скачивание может занять несколько минут…" }
     }

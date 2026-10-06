@@ -6,6 +6,14 @@ import Combine
 import WidgetKit
 
 enum Screen: Hashable { case newMeal, diary, products, day, week, coach, recipes, settings }
+enum DateError: LocalizedError {
+    case future
+    var errorDescription: String? { "Запись нельзя сохранить на будущий день. Выберите сегодняшнюю или прошедшую дату." }
+}
+enum RecognitionKeyError: LocalizedError {
+    case missing
+    var errorDescription: String? { "Для OpenAI нужен ключ. Добавьте его в Настройках или выберите бесплатный режим на Mac." }
+}
 enum WeightMode: String, CaseIterable { case portion = "Общий вес порции", ingredients = "Вес каждого ингредиента" }
 
 struct IngredientDraft: Identifiable {
@@ -21,6 +29,9 @@ struct IngredientDraft: Identifiable {
     var lookupQuery = ""
     /// Values are the model's estimate; the user is invited to confirm them in the catalog.
     var needsCatalogReview = false
+    /// Calories written by "Оценить калории по БЖУ" or taken from a product marked that way.
+    var derivedCalories: String?
+    var caloriesFromMacros: Bool { derivedCalories != nil && derivedCalories == calories }
     init() {}
     init(_ ingredient: Ingredient) {
         id = ingredient.id; name = ingredient.name; source = ingredient.source; sourceName = ingredient.name
@@ -107,8 +118,11 @@ final class AppModel: ObservableObject {
         personal = PersonalStore(directory: directory)
         coach = CoachStore(directory: directory)
         reminders = ReminderStore(directory: directory)
+        // Volumes without POSIX permissions (exFAT, some network shares) cannot restrict access.
+        // That is worth a warning, not a reason to make a readable diary read-only.
+        var permissionWarning: String?
         do { try PrivateStorage.secureExisting(in: directory) }
-        catch { storageError = "Не удалось защитить файлы дневника: \(error.localizedDescription)" }
+        catch { permissionWarning = "Не удалось ограничить доступ к файлам дневника (\(error.localizedDescription)). Записи открыты и сохраняются как обычно." }
         do {
             // If another copy holds the lock, damaged rows are still moved aside on the next save.
             let recovered = try? repository.recoverUnreadable()
@@ -116,6 +130,7 @@ final class AppModel: ObservableObject {
             if let recovered, recovered > 0 {
                 errorMessage = "Повреждённых записей в дневнике: \(recovered). Остальные записи открыты, а повреждённые без изменений перенесены в файл meals-unreadable.json в папке дневника."
             }
+            if errorMessage == nil { errorMessage = permissionWarning }
         } catch { storageError = "Не удалось открыть дневник. Существующий файл сохранён: \(error.localizedDescription)" }
         hasKey = Keychain.containsKey()
         modelName = UserDefaults.standard.string(forKey: "visionModel") ?? OpenAIService.defaultModel
@@ -142,8 +157,11 @@ final class AppModel: ObservableObject {
             return seen.insert(key).inserted
         }.prefix(5).map { $0 }
     }
+    /// The last one-click repeat, so the menu bar can offer to undo it.
+    @Published private(set) var lastRepeated: Meal?
+    @Published private(set) var repeatError: String?
     func repeatMeal(_ original: Meal) {
-        guard storageError == nil else { return }
+        guard storageError == nil else { repeatError = storageError; return }
         let repeated = Meal(date: Date(), kind: .suggested(), name: original.name, weight: original.weight,
                             ingredients: original.ingredients, notes: original.notes,
                             assumptions: original.assumptions, isEstimate: original.isEstimate)
@@ -152,10 +170,22 @@ final class AppModel: ObservableObject {
             updated.append(repeated); updated.sort { $0.date > $1.date }
             meals = try repository.save(updated, replacing: meals)
             selectedDay = repeated.date
+            lastRepeated = repeated; repeatError = nil
             notice = original.isDrink ? "Напиток добавлен повторно." : "Блюдо добавлено повторно."
             reloadWidget()
-        } catch { errorMessage = "Не удалось повторить запись: \(error.localizedDescription)" }
+        } catch {
+            repeatError = "Не удалось повторить запись: \(error.localizedDescription)"
+            errorMessage = repeatError
+        }
     }
+    func undoRepeat() {
+        guard let meal = lastRepeated else { return }
+        lastRepeated = nil
+        deleteMeal(meal)
+        if meals.contains(where: { $0.id == meal.id }) { repeatError = errorMessage }
+        else { notice = meal.isDrink ? "Повтор напитка отменён." : "Повтор блюда отменён." }
+    }
+    func dismissRepeatStatus() { lastRepeated = nil; repeatError = nil }
     var parsedWeight: Double? {
         if weightMode == .ingredients && hasResult {
             guard !drafts.isEmpty else { return nil }
@@ -284,11 +314,23 @@ final class AppModel: ObservableObject {
             drafts = [draft]
         }
     }
+    /// Proportions from before the last automatic rescale. Typing "150" passes through 1 and 15 g;
+    /// scaling from the rounded intermediate weights would distort small shares such as oil.
+    private var rescaleBasis: (ids: [UUID], grams: [Double], written: [String])?
     func rescale() {
-        guard weightMode == .portion else { return }
-        guard let target = parsedWeight, allIngredientsValid,
-              let updated = try? NutritionMath.normalize(ingredients, to: target) else { return }
-        drafts = updated.map(IngredientDraft.init)
+        guard weightMode == .portion, let target = parsedWeight else { return }
+        let weights: [Double]
+        if let basis = rescaleBasis, basis.ids == drafts.map(\.id), basis.written == drafts.map(\.grams) {
+            weights = basis.grams
+        } else {
+            guard allIngredientsValid else { return }
+            weights = ingredients.map(\.grams)
+        }
+        let sum = weights.reduce(0, +)
+        guard sum.isFinite, sum > 0 else { return }
+        // Change only the weights: names, sources and the "check in catalog" prompt stay as they are.
+        for index in drafts.indices { drafts[index].grams = Numbers.input(weights[index] * target / sum) }
+        rescaleBasis = (drafts.map(\.id), weights, drafts.map(\.grams))
     }
     func changeWeightMode(_ mode: WeightMode) {
         if mode == .portion, let sum = parsedWeight { weight = Numbers.input(sum) }
@@ -296,9 +338,13 @@ final class AppModel: ObservableObject {
     }
     func addProduct(_ product: SavedProduct, grams: Double, replacing id: UUID? = nil) {
         guard product.unit == .grams else { return }
-        let draft = IngredientDraft(product.portion(grams: grams))
-        if let id, let index = drafts.firstIndex(where: { $0.id == id }) { drafts[index] = draft }
-        else {
+        var draft = IngredientDraft(product.portion(grams: grams))
+        if product.caloriesFromMacros { draft.derivedCalories = draft.calories }
+        if let id {
+            // The row may have been deleted while the picker was open; do not bring it back.
+            guard let index = drafts.firstIndex(where: { $0.id == id }) else { return }
+            drafts[index] = draft
+        } else {
             if drafts.count == 1, drafts[0].name.isEmpty, drafts[0].calories.isEmpty { drafts = [] }
             drafts.append(draft)
         }
@@ -431,6 +477,7 @@ final class AppModel: ObservableObject {
     }
     func saveMeal() {
         guard canSave, let grams = parsedWeight else { return }
+        guard Meal.allowsDate(mealDate) else { errorMessage = DateError.future.localizedDescription; return }
         let previous = editingOriginalMeal ?? meals.first { $0.id == editingID }
         var newPhoto: String?
         do {
@@ -469,6 +516,7 @@ final class AppModel: ObservableObject {
     }
     func saveDrink(_ value: Meal, photoChange: DrinkPhotoChange = .unchanged, original: Meal? = nil) throws {
         guard storageError == nil, value.isDrink else { throw FoodError.invalidIngredient }
+        guard Meal.allowsDate(value.date) else { throw DateError.future }
         try value.validate()
         let previous = original ?? meals.first { $0.id == value.id }
         var meal = value
@@ -492,6 +540,12 @@ final class AppModel: ObservableObject {
             repository.removePhoto(newPhoto)
             throw error
         }
+    }
+    /// The OpenAI key when OpenAI is the chosen recognition provider; nil means the local model.
+    func recognitionKey() throws -> String? {
+        guard provider == .openAI else { return nil }
+        guard let saved = try Keychain.read(), !saved.isEmpty else { throw RecognitionKeyError.missing }
+        return saved
     }
     func saveSettings(key: String, model: String) -> Bool {
         do {

@@ -7,8 +7,9 @@ mkdir -p "$PWD/dist"
 source scripts/toolchain.sh
 # Keep the same build engine and output paths across Swift toolchain versions.
 swift build --build-system native -c release --scratch-path .build --cache-path .build/cache --disable-sandbox
+# Build the icon into .build so the tracked packaging/AppIcon.icns is not rewritten on every build.
 swift packaging/DrawIcon.swift .build/AppIcon.iconset
-iconutil -c icns .build/AppIcon.iconset -o packaging/AppIcon.icns
+iconutil -c icns .build/AppIcon.iconset -o .build/AppIcon.icns
 TARELKA_BIN_DIR=$(swift build --build-system native -c release --scratch-path .build --show-bin-path)
 # Sign outside iCloud Documents so Finder cannot race the signature with metadata.
 TARELKA_STAGE=$(mktemp -d /private/tmp/tarelka-build.XXXXXX)
@@ -27,16 +28,20 @@ ditto --norsrc --noextattr "$TARELKA_BIN_DIR/Tarelka_NutritionCore.bundle" "$TAR
 cp packaging/Info.plist "$TARELKA_BUNDLE/Contents/Info.plist"
 cp docs/AppleWatch.md "$TARELKA_BUNDLE/Contents/Resources/AppleWatch.md"
 cp docs/AppleWatch.md "$PWD/dist/Apple Watch.md"
-if [[ -f packaging/AppIcon.icns ]]; then
-    cp packaging/AppIcon.icns "$TARELKA_BUNDLE/Contents/Resources/AppIcon.icns"
-fi
+cp .build/AppIcon.icns "$TARELKA_BUNDLE/Contents/Resources/AppIcon.icns"
 # Finder can add these attributes when the project is inside iCloud Documents.
 xattr -rd com.apple.FinderInfo "$TARELKA_BUNDLE" 2>/dev/null || true
 xattr -rd com.apple.ResourceFork "$TARELKA_BUNDLE" 2>/dev/null || true
-codesign --force --sign - --identifier app.tarelka.personal.today-widget --entitlements packaging/Widget.entitlements "$TARELKA_BUNDLE/Contents/PlugIns/TarelkaWidget.appex"
-codesign --force --sign - --identifier app.tarelka.personal "$TARELKA_BUNDLE"
+# Ad-hoc signing (the default) changes the app's identity on every build, so macOS asks again for the
+# Keychain key and permissions. Set TARELKA_SIGN_IDENTITY to a certificate name from your login keychain
+# (for example a self-signed "Code Signing" certificate) to keep that identity across builds.
+TARELKA_SIGN_IDENTITY="${TARELKA_SIGN_IDENTITY:--}"
+codesign --force --sign "$TARELKA_SIGN_IDENTITY" --identifier app.tarelka.personal.today-widget --entitlements packaging/Widget.entitlements "$TARELKA_BUNDLE/Contents/PlugIns/TarelkaWidget.appex"
+codesign --force --sign "$TARELKA_SIGN_IDENTITY" --identifier app.tarelka.personal "$TARELKA_BUNDLE"
 codesign --verify --deep --strict "$TARELKA_BUNDLE"
 ditto -c -k --norsrc --noextattr --keepParent "$TARELKA_BUNDLE" "$PWD/dist/Тарелка.zip"
+# Replace the loose copy entirely: ditto merges into an existing bundle and would keep stale files.
+rm -rf "$PWD/dist/Тарелка.app"
 ditto --norsrc --noextattr "$TARELKA_BUNDLE" "$PWD/dist/Тарелка.app"
 xattr -rd com.apple.FinderInfo "$PWD/dist/Тарелка.app" 2>/dev/null || true
 xattr -rd com.apple.ResourceFork "$PWD/dist/Тарелка.app" 2>/dev/null || true

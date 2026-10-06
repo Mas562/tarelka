@@ -39,10 +39,10 @@ private struct BalanceWidgetView: View {
                     .foregroundStyle(blue)
             }
             if let snapshot = entry.snapshot {
-                Text(snapshot.remaining == nil ? "Съедено сегодня" : "Осталось на сегодня")
+                Text(snapshot.remaining == nil ? "Съедено сегодня" : snapshot.remaining! < 0 ? "Сверх ориентира" : "Осталось на сегодня")
                     .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(Numbers.display(snapshot.remaining ?? snapshot.eaten.calories, decimals: 0))
+                    Text(Numbers.display(snapshot.remaining.map(abs) ?? snapshot.eaten.calories, decimals: 0))
                         .font(.system(size: family == .systemSmall ? 30 : 35,
                                       weight: .semibold, design: .rounded)).monospacedDigit()
                     Text("ккал").font(.system(size: 11)).foregroundStyle(.secondary)

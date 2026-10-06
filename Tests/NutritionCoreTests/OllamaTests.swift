@@ -60,7 +60,8 @@ struct OllamaTests {
         #expect(body["think"] == nil)
         let options = try #require(body["options"] as? [String: Any])
         #expect(options["num_ctx"] as? Int == 8192)
-        #expect(options["presence_penalty"] as? Double == 1.5)
+        #expect(options["presence_penalty"] as? Double == 0)
+        #expect((options["temperature"] as? Double ?? 1) <= 0.3)
         let messages = try #require(body["messages"] as? [[String: Any]])
         #expect(messages.last?["images"] as? [String] == ["AQID"])
         #expect(throws: (any Error).self) { try OllamaService.makeRequest(jpeg: data, weight: 0, notes: "") }

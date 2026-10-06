@@ -163,7 +163,8 @@ struct ModernDateTimePicker: View {
     @Binding var selection: Date
     var body: some View {
         HStack(spacing: 10) {
-            ModernDatePicker(title: "Дата", selection: $selection)
+            // Meals and drinks are logged for today or earlier, never for a future day.
+            ModernDatePicker(title: "Дата", selection: $selection, maximumDate: Date())
             DatePicker("Время", selection: $selection, displayedComponents: .hourAndMinute)
                 .labelsHidden().datePickerStyle(.field).fixedSize()
         }

@@ -11,7 +11,7 @@ public struct MacroHint: Equatable, Sendable {
         let c = MacroProgress(eaten: eaten.carbs, target: targets.carbs)
         let ending = " Ориентиры не нужно добирать грамм в грамм."
         if eaten.calories == 0 && eaten.protein == 0 && eaten.fat == 0 && eaten.carbs == 0 {
-            return MacroHint(title: "Начнём с записей", message: "Добавь еду и напитки за день — тогда здесь появится подсказка по твоему остатку БЖУ. Отсутствие записей не означает, что ты ничего не ел.")
+            return MacroHint(title: "Начнём с записей", message: "Добавь еду и напитки за день — тогда здесь появится подсказка по твоему остатку БЖУ. Пустой дневник не значит, что за день ничего не было съедено.")
         }
         if budget.remaining <= 0 {
             return MacroHint(title: "Продолжай в обычном ритме", message: "Калорийный ориентир уже достигнут. Не нужно пропускать следующий приём пищи или компенсировать еду тренировкой. Ориентируйся на голод и привычный режим." + ending)

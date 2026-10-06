@@ -63,7 +63,7 @@ final class ReminderStore: NSObject, ObservableObject, UNUserNotificationCenterD
                 let content = UNMutableNotificationContent()
                 content.title = "\(meal.title) скоро"
                 if plan.leadMinutes == 0 { content.title = "Время: \(meal.title.lowercased())" }
-                content.body = "Не забудь показать, чем сегодня перекусил: сфотографируй еду и запиши её в «Тарелку»."
+                content.body = "Не забудь записать этот приём пищи: сфотографируй еду и добавь её в «Тарелку»."
                 content.sound = .default
                 let trigger = UNCalendarNotificationTrigger(dateMatching: meal.notificationTime(leadMinutes: plan.leadMinutes), repeats: true)
                 try await center.add(UNNotificationRequest(identifier: prefix + meal.id.uuidString, content: content, trigger: trigger))

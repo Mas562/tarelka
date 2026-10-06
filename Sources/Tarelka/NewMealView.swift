@@ -129,7 +129,7 @@ struct NewMealView: View {
                 Label("Снимайте сверху при хорошем свете", systemImage: "sun.max")
                     .font(.system(size: 10)).foregroundStyle(Palette.secondary)
                 Spacer(minLength: 0)
-                Button { model.pastePhoto() } label: { Image(systemName: "document.on.clipboard") }
+                Button { model.pastePhoto() } label: { Image(systemName: "doc.on.clipboard") }
                     .buttonStyle(.plain).foregroundStyle(Palette.green).disabled(model.isAnalyzing)
                     .help("Вставить фото · ⌘⇧V").accessibilityLabel("Вставить фото")
             }.padding(.horizontal, 3)
@@ -325,11 +325,13 @@ struct IngredientEditor: View {
                             replacingID = draft.id; initialGrams = draft.grams; showProducts = true
                         }
                         Button("Сохранить в мои продукты…") {
-                            if let ingredient = draft.ingredient { savingProduct = SavedProduct(name: ingredient.name, per100: ingredient.per100, source: ingredient.source) }
+                            if let ingredient = draft.ingredient { savingProduct = SavedProduct(name: ingredient.name, per100: ingredient.per100, caloriesFromMacros: draft.caloriesFromMacros, source: ingredient.source) }
                         }.disabled(draft.ingredient == nil)
                         Button("Оценить калории по БЖУ") {
                             if let p = Numbers.parse(draft.protein), let f = Numbers.parse(draft.fat), let c = Numbers.parse(draft.carbs) {
-                                binding.calories.wrappedValue = Numbers.input(4 * p + 9 * f + 4 * c); model.isEstimate = true
+                                var value = binding.wrappedValue
+                                value.calories = Numbers.input(4 * p + 9 * f + 4 * c); value.derivedCalories = value.calories
+                                binding.wrappedValue = value; model.isEstimate = true
                             }
                         }.disabled(Numbers.parse(draft.protein) == nil || Numbers.parse(draft.fat) == nil || Numbers.parse(draft.carbs) == nil)
                         Divider()
